@@ -1,0 +1,71 @@
+import os
+import tempfile
+import pydub
+from pydub import AudioSegment
+import streamlit as st
+
+# Sayfa Tasarımı ve Başlık
+st.set_page_config(page_title="HepsiAd Volume Normalizer", page_icon="🎙️", layout="centered")
+
+st.title("🎙️ HepsiAd - Ses Seviyesi Düzenleyici")
+st.markdown("Video veya ses dosyanızı yükleyin; hedef **-19 LUFS / -27 LUFS** standartlarına otomatik getirilsin.")
+
+# Hedef Desibel Ayarı
+st.sidebar.header("⚙️ Ayarlar")
+target_lufs = st.sidebar.slider(
+    "Hedef Ses Seviyesi (dBFS / LUFS)",
+    min_value=-27.0,
+    max_value=-19.0,
+    value=-23.0,
+    step=1.0,
+    help="Yayın standartları için önerilen değer: -23 dBFS"
+)
+
+# Dosya Yükleyici
+uploaded_file = st.file_uploader("Dosya Yükle (MP3, WAV, MP4, MOV, M4A)", type=["mp3", "wav", "mp4", "mov", "m4a"])
+
+def match_target_amplitude(sound, target_dBFS):
+    change_in_dBFS = target_dBFS - sound.dBFS
+    return sound.apply_gain(change_in_dBFS)
+
+if uploaded_file is not None:
+    st.info("📂 Dosya okundu, işleniyor...")
+    
+    # Geçici dosyaya kaydetme
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_path = tmp_file.name
+
+    try:
+        # Sesi Yükle
+        audio = AudioSegment.from_file(tmp_path)
+        current_dBFS = audio.dBFS
+        
+        st.write(f"📊 **Mevcut Ses Seviyesi:** `{current_dBFS:.2f} dBFS`")
+
+        # Normalize Et
+        normalized_audio = match_target_amplitude(audio, target_lufs)
+        new_dBFS = normalized_audio.dBFS
+
+        # Çıktı Dosyası Oluştur
+        output_path = tempfile.mktemp(suffix=".mp3")
+        normalized_audio.export(output_path, format="mp3")
+
+        st.success(f"✅ Başarıyla Dönüştürüldü! Yeni Seviye: `{new_dBFS:.2f} dBFS`")
+
+        # İşlenmiş Sesi Dinleme Arayüzü
+        with open(output_path, "rb") as f:
+            audio_bytes = f.read()
+            st.audio(audio_bytes, format="audio/mp3")
+            st.download_button(
+                label="📥 Normalize Edilmiş Dosyayı İndir",
+                data=audio_bytes,
+                file_name=f"normalized_{uploaded_file.name}.mp3",
+                mime="audio/mp3"
+            )
+
+    except Exception as e:
+        st.error(f"İşlem sırasında bir hata oluştu: {e}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
