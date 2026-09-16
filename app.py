@@ -4,7 +4,7 @@ import numpy as np
 import soundfile as sf
 import pyloudnorm as pyln
 import streamlit as st
-from moviepy.editor import VideoFileClip, AudioFileClip
+from moviepy import VideoFileClip, AudioFileClip
 
 # Sayfa Yapılandırması
 st.set_page_config(page_title="HepsiAd Volume Normalizer", page_icon="🎬", layout="centered")
