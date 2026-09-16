@@ -1,35 +1,31 @@
 import os
 import tempfile
-import pydub
-from pydub import AudioSegment
+import numpy as np
+import soundfile as sf
+import pyloudnorm as pyln
 import streamlit as st
 
-# Sayfa Tasarımı ve Başlık
+# Sayfa Yapılandırması
 st.set_page_config(page_title="HepsiAd Volume Normalizer", page_icon="🎙️", layout="centered")
 
-st.title("🎙️ HepsiAd - Ses Seviyesi Düzenleyici")
-st.markdown("Video veya ses dosyanızı yükleyin; hedef **-19 LUFS / -27 LUFS** standartlarına otomatik getirilsin.")
+st.title("🎙️ HepsiAd - Ses Seviyesi Düzenleyici (LUFS)")
+st.markdown("Video veya ses dosyanızı yükleyin; hedef **-19 LUFS / -27 LUFS** yayın standartlarına otomatik getirilsin.")
 
-# Hedef Desibel Ayarı
+# Sol Panel Ayarları
 st.sidebar.header("⚙️ Ayarlar")
 target_lufs = st.sidebar.slider(
-    "Hedef Ses Seviyesi (dBFS / LUFS)",
+    "Hedef Ses Seviyesi (LUFS)",
     min_value=-27.0,
     max_value=-19.0,
     value=-23.0,
-    step=1.0,
-    help="Yayın standartları için önerilen değer: -23 dBFS"
+    step=0.5,
+    help="TV/Dijital yayın standartları için önerilen değer: -23 LUFS (-19 ile -27 arası)"
 )
 
-# Dosya Yükleyici
-uploaded_file = st.file_uploader("Dosya Yükle (MP3, WAV, MP4, MOV, M4A)", type=["mp3", "wav", "mp4", "mov", "m4a"])
-
-def match_target_amplitude(sound, target_dBFS):
-    change_in_dBFS = target_dBFS - sound.dBFS
-    return sound.apply_gain(change_in_dBFS)
+uploaded_file = st.file_uploader("Ses Dosyası Yükle (WAV, FLAC, OGG)", type=["wav", "flac", "ogg"])
 
 if uploaded_file is not None:
-    st.info("📂 Dosya okundu, işleniyor...")
+    st.info("📂 Dosya okundu, ses analizi yapılıyor...")
     
     # Geçici dosyaya kaydetme
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
@@ -38,30 +34,33 @@ if uploaded_file is not None:
 
     try:
         # Sesi Yükle
-        audio = AudioSegment.from_file(tmp_path)
-        current_dBFS = audio.dBFS
-        
-        st.write(f"📊 **Mevcut Ses Seviyesi:** `{current_dBFS:.2f} dBFS`")
+        data, rate = sf.read(tmp_path)
 
-        # Normalize Et
-        normalized_audio = match_target_amplitude(audio, target_lufs)
-        new_dBFS = normalized_audio.dBFS
+        # LUFS Ölçümü
+        meter = pyln.Meter(rate)
+        loudness = meter.integrated_loudness(data)
 
-        # Çıktı Dosyası Oluştur
-        output_path = tempfile.mktemp(suffix=".mp3")
-        normalized_audio.export(output_path, format="mp3")
+        st.write(f"📊 **Mevcut Ses Seviyesi:** `{loudness:.2f} LUFS`")
 
-        st.success(f"✅ Başarıyla Dönüştürüldü! Yeni Seviye: `{new_dBFS:.2f} dBFS`")
+        # LUFS Normalize İşlemi
+        normalized_data = pyln.normalize.loudness(data, loudness, target_lufs)
+        new_loudness = meter.integrated_loudness(normalized_data)
 
-        # İşlenmiş Sesi Dinleme Arayüzü
+        # İşlenmiş Sesi Kaydet
+        output_path = tempfile.mktemp(suffix=".wav")
+        sf.write(output_path, normalized_data, rate)
+
+        st.success(f"✅ Başarıyla Dönüştürüldü! Yeni Seviye: `{new_loudness:.2f} LUFS`")
+
+        # İndirme ve Dinleme Arayüzü
         with open(output_path, "rb") as f:
             audio_bytes = f.read()
-            st.audio(audio_bytes, format="audio/mp3")
+            st.audio(audio_bytes, format="audio/wav")
             st.download_button(
                 label="📥 Normalize Edilmiş Dosyayı İndir",
                 data=audio_bytes,
-                file_name=f"normalized_{uploaded_file.name}.mp3",
-                mime="audio/mp3"
+                file_name=f"normalized_{uploaded_file.name}.wav",
+                mime="audio/wav"
             )
 
     except Exception as e:
