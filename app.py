@@ -23,7 +23,8 @@ target_lufs = st.sidebar.number_input("Hedef Ses Seviyesi (LUFS)", value=-23.0, 
 min_acceptable_lufs = st.sidebar.number_input("Minimum Kabul Edilebilir LUFS", value=-27.0, step=0.5)
 max_acceptable_lufs = st.sidebar.number_input("Maksimum Kabul Edilebilir LUFS", value=-19.0, step=0.5)
 
-max_duration = st.sidebar.number_input("Maksimum Video Süresi (Saniye)", value=30, step=1)
+# Maksimum Süre Varsayılan Değeri 59 Saniye Yapıldı
+max_duration = st.sidebar.number_input("Maksimum Video Süresi (Saniye)", value=59, step=1)
 
 st.sidebar.markdown("---")
 st.sidebar.header("🗜️ Sıkıştırma Ayarı (Dosya Yükleme İçin)")
