@@ -7,10 +7,10 @@ import streamlit as st
 from moviepy import VideoFileClip, AudioFileClip
 
 # Sayfa Yapılandırması
-st.set_page_config(page_title="HepsiAd Volume & Size Optimizer", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="HepsiAd Volume, Size & QC Optimizer", page_icon="🎬", layout="centered")
 
-st.title("🎬 HepsiAd - Video Sıkıştırma & Ses Düzenleyici")
-st.markdown("Video/Ses dosyanızı yükleyin; **LUFS ses seviyesi** düzenlensin, **video boyutu ve kalitesi** isteğinize göre sıkıştırılsın.")
+st.title("🎬 HepsiAd - Video Standartlaştırma & Ses Düzenleyici")
+st.markdown("Video/Ses dosyanızı yükleyin; **LUFS ses seviyesi**, **1920x1080 Full HD standart ölçü**, **Siyah Bant (Pillarbox/Letterbox) analizi** ve **Sıkıştırma** otomatik yapılsın.")
 
 # Sol Panel Ayarları
 st.sidebar.header("⚙️ Ayarlar")
@@ -25,17 +25,23 @@ target_lufs = st.sidebar.slider(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.header("🗜️ Video Sıkıştırma Ayarı")
+st.sidebar.header("📐 Çözünürlük & Siyah Bant Ayarları")
+
+force_1920_1080 = st.sidebar.checkbox("Çıktıyı 1920x1080 (Full HD) Standartına Zorla", value=True)
+fix_pillarbox = st.sidebar.checkbox("Siyah Bantları Temizle (Pillarbox/Letterbox Düzelt)", value=True)
+
+st.sidebar.markdown("---")
+st.sidebar.header("🗜️ Sıkıştırma Ayarı")
 
 auto_compress = st.sidebar.checkbox("100 MB Üstü İçin Otomatik Sıkıştır", value=True)
 
 crf_val = st.sidebar.slider(
-    "Görsel Kalite / Sıkıştırma Oranı (CRF)",
+    "Görsel Kalite / Sıkıştırma (CRF)",
     min_value=18,
     max_value=32,
     value=24,
     step=1,
-    help="CRF Düşük (18-20): Yüksek Kalite / Büyük Boyut\nCRF Orta (23-25): Dengeli Kalite / İdeal Boyut\nCRF Yüksek (28-32): Düşük Kalite / Çok Küçük Boyut"
+    help="Düşük CRF (18-20): Yüksek Kalite / Büyük Boyut\nYüksek CRF (28-32): Küçük Boyut"
 )
 
 uploaded_file = st.file_uploader(
@@ -44,7 +50,6 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    # Dosya Boyutu Hesabı (MB)
     file_size_mb = uploaded_file.size / (1024 * 1024)
     st.info(f"📂 Dosya Okundu: **{uploaded_file.name}** ({file_size_mb:.2f} MB)")
     
@@ -59,10 +64,21 @@ if uploaded_file is not None:
         extracted_audio_path = tempfile.mktemp(suffix=".wav")
         is_video = file_ext in [".mp4", ".mov", ".avi"]
 
-        # Video İşlemleri
         if is_video:
-            st.write("🎞️ Video algılandı, ses izi ayrıştırılıyor...")
+            st.write("🎞️ Video algılandı, çözünürlük ve ses analizi yapılıyor...")
             video_clip = VideoFileClip(tmp_path)
+            
+            # 1. Çözünürlük Tartımı
+            width, height = video_clip.w, video_clip.h
+            aspect_ratio = round(width / height, 2)
+            st.write(f"📐 **Orijinal Çözünürlük:** `{width}x{height}` (Oran: `{aspect_ratio}`)")
+
+            # Siyah Bant Tespiti
+            if width == 1920 and height == 1080:
+                st.success("✅ Video çözünürlüğü tam **1920x1080 (Full HD)** standartında.")
+            elif width < 1920 or aspect_ratio != 1.78:
+                st.warning("⚠️ Video 1920x1080 standartında değil veya dikey/kare siyah bantlar (Pillarbox/Letterbox) barındırıyor olabilir!")
+
             video_clip.audio.write_audiofile(extracted_audio_path, logger=None)
         else:
             extracted_audio_path = tmp_path
@@ -74,22 +90,19 @@ if uploaded_file is not None:
 
         st.write(f"📊 **Mevcut Ses Seviyesi:** `{loudness:.2f} LUFS`")
 
-        # LUFS Normalize İşlemi
+        # LUFS Normalize
         normalized_data = pyln.normalize.loudness(data, loudness, target_lufs)
         new_loudness = meter.integrated_loudness(normalized_data)
 
-        # Temp Normalize WAV
         norm_audio_path = tempfile.mktemp(suffix=".wav")
         sf.write(norm_audio_path, normalized_data, rate)
 
         st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: `{new_loudness:.2f} LUFS`")
 
-        # Video Çıktısı Hazırlama ve Boyut Sıkıştırma
         if is_video:
-            st.write("🎬 Normalize edilmiş ses videoyla birleştiriliyor...")
+            st.write("🎬 Görüntü ve ses birleştiriliyor, standartlar uygulanıyor...")
             new_audio_clip = AudioFileClip(norm_audio_path)
             
-            # MoviePy sürüm uyumluluğu
             if hasattr(video_clip, 'with_audio'):
                 final_video = video_clip.with_audio(new_audio_clip)
             else:
@@ -97,44 +110,48 @@ if uploaded_file is not None:
             
             output_video_path = tempfile.mktemp(suffix=".mp4")
 
-            # Sıkıştırma Mantığı Kararı
-            should_compress = False
+            # FFmpeg Filtrelerini Hazırlama
+            video_filters = []
+
+            # Siyah Bantları Kesme ve 1920x1080'e Güvenle Oturtma (Oran Bozmadan)
+            if fix_pillarbox or force_1920_1080:
+                # Otomatik siyah alan tespiti ve 1920x1080 siyah pad içine yazıyı uçurmadan sığdırma
+                vf_chain = "cropdetect=limit=24:round=2,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
+                video_filters.append(vf_chain)
+
+            # Sıkıştırma Parametreleri
             selected_crf = str(crf_val)
+            ffmpeg_params = []
 
-            if auto_compress and file_size_mb > 100:
-                should_compress = True
-                st.warning("⚡ Dosya 100 MB üzerinde olduğu için otomatik sıkıştırma devreye girdi.")
-            elif not auto_compress:
-                should_compress = True
-                st.info(f"⚙️ Özel Sıkıştırma Modu Aktif (CRF: {selected_crf})")
+            if video_filters:
+                ffmpeg_params.extend(["-vf", ",".join(video_filters)])
 
-            ffmpeg_params = ["-crf", selected_crf, "-preset", "medium"] if should_compress else None
+            if (auto_compress and file_size_mb > 100) or not auto_compress:
+                ffmpeg_params.extend(["-crf", selected_crf, "-preset", "medium"])
 
             final_video.write_videofile(
                 output_video_path, 
                 codec="libx264", 
                 audio_codec="aac", 
-                ffmpeg_params=ffmpeg_params,
+                ffmpeg_params=ffmpeg_params if ffmpeg_params else None,
                 logger=None
             )
 
-            # Çıktı Boyutunu Ölçme
             output_size_mb = os.path.getsize(output_video_path) / (1024 * 1024)
 
             st.balloons()
-            st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: **{output_size_mb:.2f} MB** (Orijinal: {file_size_mb:.2f} MB)")
+            st.success(f"🎉 İşlem Tamamlandı! Çıktı Çözünürlüğü: **1920x1080 Full HD** | Yeni Boyut: **{output_size_mb:.2f} MB**")
 
             with open(output_video_path, "rb") as f:
                 video_bytes = f.read()
                 st.video(video_bytes)
                 st.download_button(
-                    label=f"📥 Optimize Edilmiş Videoyu İndir ({output_size_mb:.1f} MB)",
+                    label=f"📥 1920x1080 Standart Videoyu İndir ({output_size_mb:.1f} MB)",
                     data=video_bytes,
-                    file_name=f"opt_{uploaded_file.name}",
+                    file_name=f"std_1080p_{uploaded_file.name}",
                     mime="video/mp4"
                 )
             
-            # Kapatma işlemleri
             video_clip.close()
             new_audio_clip.close()
         else:
