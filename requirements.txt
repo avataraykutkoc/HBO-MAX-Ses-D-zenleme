@@ -2,3 +2,5 @@ streamlit
 pyloudnorm
 soundfile
 numpy
+moviepy
+ffmpeg-python
