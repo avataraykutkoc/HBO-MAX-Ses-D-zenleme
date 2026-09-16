@@ -1,5 +1,6 @@
 import os
 import tempfile
+import subprocess
 import numpy as np
 import soundfile as sf
 import pyloudnorm as pyln
@@ -38,6 +39,26 @@ crf_val = st.sidebar.slider(
     help="Düşük CRF (18-20): Yüksek Kalite / Büyük Boyut\nYüksek CRF (28-32): Küçük Boyut"
 )
 
+def detect_black_borders(video_path):
+    """FFmpeg cropdetect filtresi ile piksel seviyesinde siyah bant tespiti yapar."""
+    try:
+        cmd = [
+            "ffmpeg", "-i", video_path,
+            "-vf", "cropdetect=limit=24:round=2",
+            "-vframes", "30", "-f", "null", "-"
+        ]
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
+        lines = result.stderr.split('\n')
+        crops = [line for line in lines if "crop=" in line]
+        
+        if crops:
+            last_crop = crops[-1].split("crop=")[1].split()[0]
+            w, h, x, y = map(int, last_crop.split(':'))
+            return w, h, x, y
+    except Exception:
+        pass
+    return None
+
 uploaded_file = st.file_uploader(
     "Video veya Ses Dosyası Yükle (MP4, MOV, AVI, WAV, MP3)", 
     type=["mp4", "mov", "avi", "wav", "mp3", "flac"]
@@ -68,22 +89,29 @@ if uploaded_file is not None:
             video_clip = VideoFileClip(tmp_path)
             
             width, height = video_clip.w, video_clip.h
-            aspect_ratio = round(width / height, 2)
-            
-            # Sol Menü Uyarı Mantığı
-            st.sidebar.write(f"📐 **Mevcut Ölçü:** `{width}x{height}`")
+            st.sidebar.write(f"📐 **Çözünürlük:** `{width}x{height}`")
 
             if width == 1920 and height == 1080:
-                st.sidebar.success("✅ **Format Uygun:** Video tam 1920x1080 (16:9) ölçüsünde.")
+                st.sidebar.success("✅ **Çözünürlük Uygun:** 1920x1080")
             else:
-                st.sidebar.error("⚠️ **Hatalı Standart:** Video 1920x1080 değil!")
+                st.sidebar.error("⚠️ **Hatalı Çözünürlük:** Video 1920x1080 değil!")
 
-            # Letterbox / Pillarbox Tespiti (Görsel Oran Analizi)
-            if aspect_ratio < 1.77:
-                st.sidebar.warning("⚠️ **Pillarboxing Tespiti:** Videonun sağ/sol tarafında dikey siyah bantlar olabilir!")
-            elif aspect_ratio > 1.78:
-                st.sidebar.warning("⚠️ **Letterboxing Tespiti:** Videonun alt/üst tarafında yatay siyah bantlar olabilir!")
+            # PIKSEL SEVİYESİNDE SIYAH BANT DETEKTÖRÜ
+            crop_info = detect_black_borders(tmp_path)
+            if crop_info:
+                crop_w, crop_h, crop_x, crop_y = crop_info
+                
+                # Toleranslı Kontrol (Piksel kaymaları için)
+                has_letterbox = (height - crop_h) > 20
+                has_pillarbox = (width - crop_w) > 20
 
+                if has_letterbox:
+                    st.sidebar.warning("⚠️ **Letterboxing Tespiti:** Videoda Alt/Üst Siyah Bant var!")
+                if has_pillarbox:
+                    st.sidebar.warning("⚠️ **Pillarboxing Tespiti:** Videoda Sağ/Sol Siyah Bant var!")
+                if not has_letterbox and not has_pillarbox:
+                    st.sidebar.success("✅ **Temiz Kadraj:** Siyah bant tespit edilmedi.")
+            
             video_clip.audio.write_audiofile(extracted_audio_path, logger=None)
         else:
             st.sidebar.info("🎵 Yüklenen dosya Ses Formatında.")
