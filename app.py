@@ -7,10 +7,10 @@ import streamlit as st
 from moviepy import VideoFileClip, AudioFileClip
 
 # Sayfa Yapılandırması
-st.set_page_config(page_title="HepsiAd Volume Normalizer", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="HepsiAd Volume & Size Optimizer", page_icon="🎬", layout="centered")
 
-st.title("🎬 HepsiAd - Video & Ses Seviyesi Düzenleyici (LUFS)")
-st.markdown("MP4/Video veya ses dosyanızı yükleyin; hedef **-19 LUFS / -27 LUFS** yayın standartlarına otomatik getirilsin.")
+st.title("🎬 HepsiAd - Video Sıkıştırma & Ses Düzenleyici")
+st.markdown("Video/Ses dosyanızı yükleyin; **LUFS ses seviyesi** düzenlensin, **100 MB üstü videolar kaliteden ödün vermeden** otomatik küçültülsün.")
 
 # Sol Panel Ayarları
 st.sidebar.header("⚙️ Ayarlar")
@@ -20,7 +20,7 @@ target_lufs = st.sidebar.slider(
     max_value=-19.0,
     value=-23.0,
     step=0.5,
-    help="TV/Dijital yayın standartları için önerilen değer: -23 LUFS (-19 ile -27 arası)"
+    help="TV/Dijital yayın standartları için önerilen değer: -23 LUFS"
 )
 
 uploaded_file = st.file_uploader(
@@ -29,7 +29,9 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    st.info("📂 Dosya okundu, işlem başlatılıyor...")
+    # Dosya Boyutu Hesabı (MB)
+    file_size_mb = uploaded_file.size / (1024 * 1024)
+    st.info(f"📂 Dosya Okundu: **{uploaded_file.name}** ({file_size_mb:.2f} MB)")
     
     file_ext = os.path.splitext(uploaded_file.name)[1].lower()
     
@@ -42,7 +44,7 @@ if uploaded_file is not None:
         extracted_audio_path = tempfile.mktemp(suffix=".wav")
         is_video = file_ext in [".mp4", ".mov", ".avi"]
 
-        # Video ise sesini sök
+        # Video İşlemleri
         if is_video:
             st.write("🎞️ Video algılandı, ses izi ayrıştırılıyor...")
             video_clip = VideoFileClip(tmp_path)
@@ -67,7 +69,7 @@ if uploaded_file is not None:
 
         st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: `{new_loudness:.2f} LUFS`")
 
-        # Video Çıktısı Hazırlama
+        # Video Çıktısı Hazırlama ve Boyut Sıkıştırma
         if is_video:
             st.write("🎬 Normalize edilmiş ses videoyla birleştiriliyor...")
             new_audio_clip = AudioFileClip(norm_audio_path)
@@ -79,15 +81,35 @@ if uploaded_file is not None:
                 final_video = video_clip.set_audio(new_audio_clip)
             
             output_video_path = tempfile.mktemp(suffix=".mp4")
-            final_video.write_videofile(output_video_path, codec="libx264", audio_codec="aac", logger=None)
+
+            # 100 MB Üstü Sıkıştırma Kurgusu
+            ffmpeg_params = []
+            if file_size_mb > 100:
+                st.warning("⚡ Dosya 100 MB üzerinde! Kalite korunarak akıllı video sıkıştırma uygulanıyor...")
+                # CRF 24: Kalite kaybı hissettirmeden yüksek sıkıştırma sağlar
+                ffmpeg_params = ["-crf", "24", "-preset", "medium"]
+
+            final_video.write_videofile(
+                output_video_path, 
+                codec="libx264", 
+                audio_codec="aac", 
+                ffmpeg_params=ffmpeg_params if ffmpeg_params else None,
+                logger=None
+            )
+
+            # Çıktı Boyutunu Ölçme
+            output_size_mb = os.path.getsize(output_video_path) / (1024 * 1024)
+
+            st.balloons()
+            st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: **{output_size_mb:.2f} MB** (Orijinal: {file_size_mb:.2f} MB)")
 
             with open(output_video_path, "rb") as f:
                 video_bytes = f.read()
                 st.video(video_bytes)
                 st.download_button(
-                    label="📥 Normalize Edilmiş Videoyu İndir (MP4)",
+                    label=f"📥 Optimize Edilmiş Videoyu İndir ({output_size_mb:.1f} MB)",
                     data=video_bytes,
-                    file_name=f"normalized_{uploaded_file.name}",
+                    file_name=f"opt_{uploaded_file.name}",
                     mime="video/mp4"
                 )
             
