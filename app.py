@@ -73,7 +73,11 @@ if uploaded_file is not None:
             new_audio_clip = AudioFileClip(norm_audio_path)
             final_video = video_clip.set_audio(new_audio_clip)
             
-            output_video_path = tempfile.mktemp(suffix=".mp4")
+            # MoviePy v2.0+ uyumlu ses birleştirme
+try:
+    final_video = video_clip.with_audio(new_audio_clip)
+except AttributeError:
+    final_video = video_clip.set_audio(new_audio_clip)
             final_video.write_videofile(output_video_path, codec="libx264", audio_codec="aac", logger=None)
 
             with open(output_video_path, "rb") as f:
