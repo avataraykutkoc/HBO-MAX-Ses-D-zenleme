@@ -18,7 +18,11 @@ st.markdown("İster **VAST Tag URL**'si analiz edin, ister bilgisayarınızdan *
 st.sidebar.header("⚙️ QC Standart Limitleri")
 
 target_lufs = st.sidebar.number_input("Hedef Ses Seviyesi (LUFS)", value=-23.0, step=0.5)
-lufs_tolerance = st.sidebar.number_input("LUFS Toleransı (±)", value=1.0, step=0.5)
+
+# Uygun LUFS Aralık Tanımları (-27 ile -19 arası)
+min_acceptable_lufs = st.sidebar.number_input("Minimum Kabul Edilebilir LUFS", value=-27.0, step=0.5)
+max_acceptable_lufs = st.sidebar.number_input("Maksimum Kabul Edilebilir LUFS", value=-19.0, step=0.5)
+
 max_duration = st.sidebar.number_input("Maksimum Video Süresi (Saniye)", value=30, step=1)
 
 st.sidebar.markdown("---")
@@ -102,13 +106,12 @@ def process_video_qc(video_path):
             loudness = meter.integrated_loudness(data)
             
             st.write(f"**Mevcut Ses:** `{loudness:.2f} LUFS`")
-            min_lufs = target_lufs - lufs_tolerance
-            max_lufs = target_lufs + lufs_tolerance
             
-            if min_lufs <= loudness <= max_lufs:
-                st.success(f"✅ Standart İdeal ({target_lufs} ±{lufs_tolerance} LUFS)")
+            # Esnek Uygun Aralık Kontrolü (-27.0 ile -19.0 arası)
+            if min_acceptable_lufs <= loudness <= max_acceptable_lufs:
+                st.success(f"✅ **Ses Uygun** ({min_acceptable_lufs} / {max_acceptable_lufs} LUFS aralığında)")
             else:
-                st.error(f"⚠️ **Ses Uyumsuz!** (Hedef: {target_lufs} LUFS)")
+                st.error(f"🚨 **Ses Uyumsuz!** (Kabul Edilen: {min_acceptable_lufs} ile {max_acceptable_lufs} LUFS arası)")
                 
             if os.path.exists(audio_path):
                 os.remove(audio_path)
@@ -207,7 +210,6 @@ with tab2:
             else:
                 extracted_audio_path = tmp_path
 
-            # Ses Normalizasyonu ve Sıkıştırma İşlemi
             st.markdown("---")
             st.markdown("### 🛠️ Ses Normalizasyonu ve Dosya İşleme")
             
@@ -224,7 +226,6 @@ with tab2:
             st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: `{new_loudness:.2f} LUFS`")
 
             if is_video:
-                new_audio_clip = VideoFileClip(tmp_path).audio
                 final_video = video_clip.set_audio(AudioFileClip(norm_audio_path))
                 
                 output_video_path = tempfile.mktemp(suffix=".mp4")
