@@ -10,10 +10,11 @@ from moviepy import VideoFileClip, AudioFileClip
 st.set_page_config(page_title="HepsiAd Volume & Size Optimizer", page_icon="🎬", layout="centered")
 
 st.title("🎬 HepsiAd - Video Sıkıştırma & Ses Düzenleyici")
-st.markdown("Video/Ses dosyanızı yükleyin; **LUFS ses seviyesi** düzenlensin, **100 MB üstü videolar kaliteden ödün vermeden** otomatik küçültülsün.")
+st.markdown("Video/Ses dosyanızı yükleyin; **LUFS ses seviyesi** düzenlensin, **video boyutu ve kalitesi** isteğinize göre sıkıştırılsın.")
 
 # Sol Panel Ayarları
 st.sidebar.header("⚙️ Ayarlar")
+
 target_lufs = st.sidebar.slider(
     "Hedef Ses Seviyesi (LUFS)",
     min_value=-27.0,
@@ -21,6 +22,20 @@ target_lufs = st.sidebar.slider(
     value=-23.0,
     step=0.5,
     help="TV/Dijital yayın standartları için önerilen değer: -23 LUFS"
+)
+
+st.sidebar.markdown("---")
+st.sidebar.header("🗜️ Video Sıkıştırma Ayarı")
+
+auto_compress = st.sidebar.checkbox("100 MB Üstü İçin Otomatik Sıkıştır", value=True)
+
+crf_val = st.sidebar.slider(
+    "Görsel Kalite / Sıkıştırma Oranı (CRF)",
+    min_value=18,
+    max_value=32,
+    value=24,
+    step=1,
+    help="CRF Düşük (18-20): Yüksek Kalite / Büyük Boyut\nCRF Orta (23-25): Dengeli Kalite / İdeal Boyut\nCRF Yüksek (28-32): Düşük Kalite / Çok Küçük Boyut"
 )
 
 uploaded_file = st.file_uploader(
@@ -82,18 +97,24 @@ if uploaded_file is not None:
             
             output_video_path = tempfile.mktemp(suffix=".mp4")
 
-            # 100 MB Üstü Sıkıştırma Kurgusu
-            ffmpeg_params = []
-            if file_size_mb > 100:
-                st.warning("⚡ Dosya 100 MB üzerinde! Kalite korunarak akıllı video sıkıştırma uygulanıyor...")
-                # CRF 24: Kalite kaybı hissettirmeden yüksek sıkıştırma sağlar
-                ffmpeg_params = ["-crf", "24", "-preset", "medium"]
+            # Sıkıştırma Mantığı Kararı
+            should_compress = False
+            selected_crf = str(crf_val)
+
+            if auto_compress and file_size_mb > 100:
+                should_compress = True
+                st.warning("⚡ Dosya 100 MB üzerinde olduğu için otomatik sıkıştırma devreye girdi.")
+            elif not auto_compress:
+                should_compress = True
+                st.info(f"⚙️ Özel Sıkıştırma Modu Aktif (CRF: {selected_crf})")
+
+            ffmpeg_params = ["-crf", selected_crf, "-preset", "medium"] if should_compress else None
 
             final_video.write_videofile(
                 output_video_path, 
                 codec="libx264", 
                 audio_codec="aac", 
-                ffmpeg_params=ffmpeg_params if ffmpeg_params else None,
+                ffmpeg_params=ffmpeg_params,
                 logger=None
             )
 
