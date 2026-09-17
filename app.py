@@ -240,17 +240,7 @@ with tab2:
             if is_video:
                 output_video_path = tempfile.mktemp(suffix=".mp4")
                 
-                # Sesi video ile FFmpeg kullanarak hızlı ve doğrudan birleştiriyoruz
-                ffmpeg_merge_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", tmp_path,
-                    "-i", norm_audio_path,
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-map", "0:v:0",
-                    "-map", "1:a:0"
-                ]
-
+                # Sesi video ile FFmpeg kullanarak birleştiriyoruz
                 if (auto_compress and file_size_mb > 100) or not auto_compress:
                     ffmpeg_merge_cmd = [
                         "ffmpeg", "-y",
@@ -261,27 +251,42 @@ with tab2:
                         "-preset", "medium",
                         "-c:a", "aac",
                         "-map", "0:v:0",
-                        "-map", "1:a:0"
+                        "-map", "1:a:0",
+                        output_video_path
+                    ]
+                else:
+                    ffmpeg_merge_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", tmp_path,
+                        "-i", norm_audio_path,
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        "-map", "0:v:0",
+                        "-map", "1:a:0",
+                        output_video_path
                     ]
 
-                subprocess.run(ffmpeg_merge_cmd, check=True)
+                result = subprocess.run(ffmpeg_merge_cmd, stderr=subprocess.PIPE, text=True)
 
-                output_size_mb = os.path.getsize(output_video_path) / (1024 * 1024)
+                if result.returncode == 0 and os.path.exists(output_video_path):
+                    output_size_mb = os.path.getsize(output_video_path) / (1024 * 1024)
 
-                st.balloons()
-                st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: **{output_size_mb:.2f} MB**")
+                    st.balloons()
+                    st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: **{output_size_mb:.2f} MB**")
 
-                with open(output_video_path, "rb") as f:
-                    video_bytes = f.read()
-                    st.download_button(
-                        label=f"📥 Normalize Edilmiş Videoyu İndir ({output_size_mb:.1f} MB)",
-                        data=video_bytes,
-                        file_name=f"opt_{uploaded_file.name}",
-                        mime="video/mp4"
-                    )
-                
-                if os.path.exists(output_video_path):
-                    os.remove(output_video_path)
+                    with open(output_video_path, "rb") as f:
+                        video_bytes = f.read()
+                        st.download_button(
+                            label=f"📥 Normalize Edilmiş Videoyu İndir ({output_size_mb:.1f} MB)",
+                            data=video_bytes,
+                            file_name=f"opt_{uploaded_file.name}",
+                            mime="video/mp4"
+                        )
+                    
+                    if os.path.exists(output_video_path):
+                        os.remove(output_video_path)
+                else:
+                    st.error(f"FFmpeg İşleme Hatası: {result.stderr}")
             else:
                 with open(norm_audio_path, "rb") as f:
                     audio_bytes = f.read()
