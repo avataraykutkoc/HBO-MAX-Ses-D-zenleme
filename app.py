@@ -120,6 +120,24 @@ def process_video_qc(video_path):
 
     clip.close()
 
+def upload_to_fileio(filepath, expires_in_days=14):
+    """File.io servisine yükleyip doğrudan WeTransfer benzeri indirme linki üretir"""
+    try:
+        url = "https://file.io"
+        with open(filepath, "rb") as f:
+            response = requests.post(
+                url, 
+                files={"file": f}, 
+                data={"expires": f"{expires_in_days}d", "autoDelete": "false"}
+            )
+        if response.status_code == 200:
+            res_json = response.json()
+            if res_json.get("success"):
+                return res_json.get("link")
+    except Exception:
+        pass
+    return None
+
 # ----------------------------------------------------
 # TAB 1: VAST TAG ANALİZİ
 # ----------------------------------------------------
@@ -274,14 +292,25 @@ with tab2:
                     st.balloons()
                     st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: **{output_size_mb:.2f} MB**")
 
-                    with open(output_video_path, "rb") as f:
-                        video_bytes = f.read()
-                        st.download_button(
-                            label=f"📥 Normalize Edilmiş Videoyu İndir ({output_size_mb:.1f} MB)",
-                            data=video_bytes,
-                            file_name=f"opt_{uploaded_file.name}",
-                            mime="video/mp4"
-                        )
+                    # OTOMATİK LİNK OLUŞTURMA SÜRECİ
+                    with st.spinner("🚀 İngiltere / Global Paylaşım Linki Oluşturuluyor..."):
+                        generated_link = upload_to_fileio(output_video_path)
+
+                    if generated_link:
+                        st.markdown("### 🌐 Global İndirme Linki (İngiltere Ekibine Direkt Atabilirsin)")
+                        st.code(generated_link, language="text")
+                        st.caption("ℹ️ Bu link doğrudan indirilebilir durumdadır, herhangi bir oturum açma gerektirmez.")
+
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        with open(output_video_path, "rb") as f:
+                            video_bytes = f.read()
+                            st.download_button(
+                                label=f"📥 Bilgisayara İndir ({output_size_mb:.1f} MB)",
+                                data=video_bytes,
+                                file_name=f"opt_{uploaded_file.name}",
+                                mime="video/mp4"
+                            )
                     
                     if os.path.exists(output_video_path):
                         os.remove(output_video_path)
