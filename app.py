@@ -163,7 +163,7 @@ with tab1:
                         file_type = elem.attrib.get('type', '')
                         url = elem.text.strip() if elem.text else ''
                         
-                        if api_framework.upper() == 'VPAID' or 'javascript' in file_type:
+                        if api_framework.upper() == 'VPAID' or 'javascript' in file_type or url.endswith('.js'):
                             has_vpaid = True
                         
                         if url:
@@ -176,31 +176,41 @@ with tab1:
                 st.success("✅ **VPAID Yok (Pure VAST / Standart MP4 Video)**")
 
             if media_files:
-                selected_media = media_files[0][1]
-                st.write(f"📦 **Çekilen Video Linki:**")
+                # Öncelikle video formatındaki (MP4/MOV) linkleri ara
+                video_media = [url for ftype, url in media_files if any(ext in url.lower() for ext in ['.mp4', '.mov', 'video'])]
+                
+                if video_media:
+                    selected_media = video_media[0]
+                else:
+                    selected_media = media_files[0][1]
+
+                st.write(f"📦 **Çekilen Medya Linki:**")
                 st.code(selected_media, language="text")
                 
-                with st.spinner("Video FFmpeg ile güvenli şekilde indiriliyor ve analiz ediliyor..."):
-                    tmp_vid_path = tempfile.mktemp(suffix=".mp4")
-                    
-                    ffmpeg_download_cmd = [
-                        "ffmpeg", "-y",
-                        "-user_agent", headers["User-Agent"],
-                        "-i", selected_media,
-                        "-c", "copy",
-                        tmp_vid_path
-                    ]
-                    
-                    dl_result = subprocess.run(ffmpeg_download_cmd, stderr=subprocess.PIPE, text=True)
-                    
-                    if os.path.exists(tmp_vid_path) and os.path.getsize(tmp_vid_path) > 1000:
-                        st.video(selected_media)
-                        process_video_qc(tmp_vid_path)
-                    else:
-                        st.error("🚨 **Video Çekilemedi!** Link erişim kısıtlamalı, geçersiz veya desteklenmeyen bir akış formatında.")
-                    
-                    if os.path.exists(tmp_vid_path):
-                        os.remove(tmp_vid_path)
+                if selected_media.endswith('.js') or 'javascript' in selected_media:
+                    st.warning("⚠️ Bu VAST Tag doğrudan bir MP4 video dosyası barındırmıyor; sadece VPAID JavaScript adresi içeriyor. Video akışı dinamik çekildiği için direkt medya QC analizi yapılamaz.")
+                else:
+                    with st.spinner("Video FFmpeg ile güvenli şekilde indiriliyor ve analiz ediliyor..."):
+                        tmp_vid_path = tempfile.mktemp(suffix=".mp4")
+                        
+                        ffmpeg_download_cmd = [
+                            "ffmpeg", "-y",
+                            "-user_agent", headers["User-Agent"],
+                            "-i", selected_media,
+                            "-c", "copy",
+                            tmp_vid_path
+                        ]
+                        
+                        dl_result = subprocess.run(ffmpeg_download_cmd, stderr=subprocess.PIPE, text=True)
+                        
+                        if os.path.exists(tmp_vid_path) and os.path.getsize(tmp_vid_path) > 1000:
+                            st.video(selected_media)
+                            process_video_qc(tmp_vid_path)
+                        else:
+                            st.error("🚨 **Video Çekilemedi!** Link erişim kısıtlamalı, geçersiz veya desteklenmeyen bir akış formatında.")
+                        
+                        if os.path.exists(tmp_vid_path):
+                            os.remove(tmp_vid_path)
             else:
                 st.warning("⚠️ VAST XML içerisinde oynatılabilir MediaFile bulunamadı.")
 
