@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import soundfile as sf
 import pyloudnorm as pyln
 import streamlit as st
-from moviepy import VideoFileClip, AudioFileClip
+from moviepy import VideoFileClip
 
 # Sayfa Ayarları
 st.set_page_config(page_title="HepsiAd Volume, Size & VAST QC Optimizer", page_icon="🎬", layout="wide")
@@ -165,7 +165,6 @@ with tab1:
                 with st.spinner("Video FFmpeg ile güvenli şekilde indiriliyor ve analiz ediliyor..."):
                     tmp_vid_path = tempfile.mktemp(suffix=".mp4")
                     
-                    # Videoyu doğrudan FFmpeg ile indirip MP4 olarak paketliyoruz (Redirect/HLS korumalı)
                     ffmpeg_download_cmd = [
                         "ffmpeg", "-y",
                         "-user_agent", headers["User-Agent"],
@@ -219,6 +218,7 @@ with tab2:
                 
                 video_clip = VideoFileClip(tmp_path)
                 video_clip.audio.write_audiofile(extracted_audio_path, logger=None)
+                video_clip.close()
             else:
                 extracted_audio_path = tmp_path
 
@@ -238,22 +238,33 @@ with tab2:
             st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: `{new_loudness:.2f} LUFS`")
 
             if is_video:
-                final_video = video_clip.set_audio(AudioFileClip(norm_audio_path))
-                
                 output_video_path = tempfile.mktemp(suffix=".mp4")
-                ffmpeg_params = []
-                selected_crf = str(crf_val)
+                
+                # Sesi video ile FFmpeg kullanarak hızlı ve doğrudan birleştiriyoruz
+                ffmpeg_merge_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", tmp_path,
+                    "-i", norm_audio_path,
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0"
+                ]
 
                 if (auto_compress and file_size_mb > 100) or not auto_compress:
-                    ffmpeg_params.extend(["-crf", selected_crf, "-preset", "medium"])
+                    ffmpeg_merge_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", tmp_path,
+                        "-i", norm_audio_path,
+                        "-c:v", "libx264",
+                        "-crf", str(crf_val),
+                        "-preset", "medium",
+                        "-c:a", "aac",
+                        "-map", "0:v:0",
+                        "-map", "1:a:0"
+                    ]
 
-                final_video.write_videofile(
-                    output_video_path, 
-                    codec="libx264", 
-                    audio_codec="aac", 
-                    ffmpeg_params=ffmpeg_params if ffmpeg_params else None,
-                    logger=None
-                )
+                subprocess.run(ffmpeg_merge_cmd, check=True)
 
                 output_size_mb = os.path.getsize(output_video_path) / (1024 * 1024)
 
@@ -269,7 +280,8 @@ with tab2:
                         mime="video/mp4"
                     )
                 
-                video_clip.close()
+                if os.path.exists(output_video_path):
+                    os.remove(output_video_path)
             else:
                 with open(norm_audio_path, "rb") as f:
                     audio_bytes = f.read()
@@ -280,6 +292,11 @@ with tab2:
                         file_name=f"normalized_{uploaded_file.name}.wav",
                         mime="audio/wav"
                     )
+
+            if os.path.exists(norm_audio_path):
+                os.remove(norm_audio_path)
+            if os.path.exists(extracted_audio_path) and is_video:
+                os.remove(extracted_audio_path)
 
         except Exception as e:
             st.error(f"İşlem sırasında bir hata oluştu: {e}")
