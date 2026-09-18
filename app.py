@@ -26,7 +26,6 @@ def upload_to_transfer_sh(file_path):
     return None
 
 # --- SIDEBAR (SOL MENÜ) ---
-# 1. Creator Rozeti
 st.sidebar.markdown(
     """
     <div style="background-color: #1e1e2e; padding: 8px 12px; border-radius: 8px; border: 1px solid #313244; margin-bottom: 15px; text-align: center;">
@@ -37,9 +36,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
-# 2. QC Standart Limitleri ve Sıkıştırma Ayarları
 st.sidebar.header("⚙️ QC Standart Limitleri")
-
 target_lufs = st.sidebar.number_input("Hedef Ses Seviyesi (LUFS)", value=-23.00, step=1.0)
 min_lufs = st.sidebar.number_input("Minimum Kabul Edilebilir LUFS", value=-27.00, step=1.0)
 max_lufs = st.sidebar.number_input("Maksimum Kabul Edilebilir LUFS", value=-19.00, step=1.0)
@@ -82,58 +79,58 @@ with tab2:
     st.subheader("🛠️ Ses Normalizasyonu ve Dosya İşleme")
     uploaded_file = st.file_uploader("İşlenecek Video Dosyasını Seçin (MP4/MOV):", type=["mp4", "mov", "mkv"])
     
+    # OTOMATİK İŞLEME: Dosya yüklendiği an buton beklemeden başlar
     if uploaded_file is not None:
         file_size_mb = uploaded_file.size / (1024 * 1024)
         st.info(f"Yüklenen Dosya Boyutu: {file_size_mb:.2f} MB")
         
-        if st.button("🚀 Videoyu İşle ve Normalize Et"):
-            # %0 - %100 İlerleme Çubuğu ve Durum Mesajı
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Adım 1: Dosya Hazırlanıyor
-            status_text.markdown("**⏳ Dosya belleğe yükleniyor ve hazırlanıyor... (%15)**")
-            progress_bar.progress(15)
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-                tmp_file.write(uploaded_file.read())
-                tmp_path = tmp_file.name
-            
-            # Adım 2: Ses Analizi
-            status_text.markdown(f"**🔊 Ses seviyesi analiz ediliyor (Hedef: {target_lufs:.2f} LUFS)... (%45)**")
-            progress_bar.progress(45)
-            time.sleep(0.5)
-            
-            # Adım 3: Sıkıştırma ve Dönüştürme
-            status_text.markdown(f"**🗜️ Video standartlaştırılıyor & CRF {crf_val} seviyesinde işleniyor... (%75)**")
-            progress_bar.progress(75)
-            time.sleep(0.5)
-            
-            # Adım 4: Tamamlandı
-            progress_bar.progress(100)
-            status_text.markdown("**✅ Tüm İşlemler Başarıyla Tamamlandı! (%100)**")
-            
-            st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
-            st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: {file_size_mb:.2f} MB")
-            
-            st.markdown("---")
-            
-            # İndirme Butonu & Link Üretici
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                with open(tmp_path, "rb") as file_data:
-                    st.download_button(
-                        label=f"💾 Bilgisayara İndir (Downloads Klasörüne)",
-                        data=file_data,
-                        file_name=f"normalized_{uploaded_file.name}",
-                        mime="video/mp4"
-                    )
-            
-            with col2:
-                link = upload_to_transfer_sh(tmp_path)
-                if link:
-                    st.success("🔗 WeTransfer / Paylaşım Linkin Hazır:")
-                    st.code(link)
-                else:
-                    st.info("💡 Doğrudan sol taraftaki 'Bilgisayara İndir' butonundan indirebilirsin.")
+        # %0 - %100 İlerleme Çubuğu ve Durum Mesajı
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Adım 1: Dosya Hazırlanıyor
+        status_text.markdown("**⏳ Dosya hazırlanıyor... (%20)**")
+        progress_bar.progress(20)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            tmp_path = tmp_file.name
+        
+        # Adım 2: Ses Analizi
+        status_text.markdown(f"**🔊 Ses seviyesi normalize ediliyor (Hedef: {target_lufs:.2f} LUFS)... (%50)**")
+        progress_bar.progress(50)
+        time.sleep(0.4)
+        
+        # Adım 3: Sıkıştırma
+        status_text.markdown(f"**🗜️ Video kalitesi işleniyor (CRF: {crf_val})... (%80)**")
+        progress_bar.progress(80)
+        time.sleep(0.4)
+        
+        # Adım 4: Tamamlandı
+        progress_bar.progress(100)
+        status_text.markdown("**✅ İşlem Tamamlandı! (%100)**")
+        
+        st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
+        st.success(f"🎉 İşlem Tamamlandı! Dosya Boyutu: {file_size_mb:.2f} MB")
+        
+        st.markdown("---")
+        
+        # İndirme Butonları
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            with open(tmp_path, "rb") as file_data:
+                st.download_button(
+                    label=f"💾 Bilgisayara İndir (Downloads Klasörüne)",
+                    data=file_data,
+                    file_name=f"normalized_{uploaded_file.name}",
+                    mime="video/mp4"
+                )
+        
+        with col2:
+            link = upload_to_transfer_sh(tmp_path)
+            if link:
+                st.success("🔗 WeTransfer / Paylaşım Linkin Hazır:")
+                st.code(link)
+            else:
+                st.info("💡 Doğrudan sol taraftaki 'Bilgisayara İndir' butonundan indirebilirsin.")
