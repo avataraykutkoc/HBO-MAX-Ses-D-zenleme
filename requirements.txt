@@ -1,6 +1,6 @@
 streamlit
-pyloudnorm
-soundfile
-numpy
-moviepy
-ffmpeg-python
+requests
+pandas
+google-cloud-bigquery
+google-auth
+db-dtypes
