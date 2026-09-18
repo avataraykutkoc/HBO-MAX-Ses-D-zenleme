@@ -4,6 +4,7 @@ import tempfile
 import requests
 import subprocess
 import time
+import re
 import xml.etree.ElementTree as ET
 
 # --- Streamlit Sayfa Yapılandırması ---
@@ -24,6 +25,58 @@ def upload_to_transfer_sh(file_path):
     except Exception:
         return None
     return None
+
+# --- VAST Tag Çözücü & Analiz Motoru ---
+def parse_vast_tag(url):
+    try:
+        # Timestamp ve makroları temizle
+        clean_url = re.sub(r'\[timestamp\]|\$\{.*?\}', '12345678', url)
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        response = requests.get(clean_url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return False, f"HTTP Hatası: {response.status_code} - Linke erişilemedi."
+            
+        xml_data = response.text
+        root = ET.fromstring(xml_data)
+        
+        # XML Namespace temizliği
+        for elem in root.iter():
+            if '}' in elem.tag:
+                elem.tag = elem.tag.split('}', 1)[1]
+                
+        # MediaFile (Video Linki) Bulma
+        media_files = root.findall('.//MediaFile')
+        duration_elem = root.find('.//Duration')
+        
+        duration = duration_elem.text if duration_elem is not None else "Bilinmiyor"
+        
+        video_links = []
+        for mf in media_files:
+            if mf.text and mf.text.strip():
+                video_links.append({
+                    'url': mf.text.strip(),
+                    'type': mf.attrib.get('type', 'mp4'),
+                    'width': mf.attrib.get('width', 'N/A'),
+                    'height': mf.attrib.get('height', 'N/A'),
+                    'bitrate': mf.attrib.get('bitrate', 'N/A')
+                })
+                
+        if not video_links:
+            return False, "VAST XML başarıyla çekildi fakat içerisinde geçerli bir <MediaFile> (video dosyası) bulunamadı."
+            
+        return True, {
+            'duration': duration,
+            'videos': video_links,
+            'raw_xml': xml_data
+        }
+        
+    except Exception as e:
+        return False, f"VAST Analiz Hatası: {str(e)}"
 
 # --- SIDEBAR (SOL MENÜ) ---
 st.sidebar.markdown(
@@ -68,10 +121,33 @@ tab1, tab2 = st.tabs(["🔗 VAST Tag Analizi", "📁 Doğrudan Video Yükleme & 
 
 with tab1:
     st.subheader("VAST Tag Analiz Paneli")
-    vast_url = st.text_input("VAST Tag URL Adresini Girin:", placeholder="https://example.com/vast.xml")
-    if st.button("VAST Tag'i Analiz Et"):
+    vast_url = st.text_input("VAST Tag URL Adresini Girin:", placeholder="https://track.adform.net/serving/videoad/...")
+    
+    if st.button("🔍 VAST Tag'i Analiz Et"):
         if vast_url:
-            st.info("VAST Tag analizi yapılıyor...")
+            with st.spinner("VAST Tag sunucudan çekiliyor ve XML çözümleniyor..."):
+                success, result = parse_vast_tag(vast_url)
+                
+                if success:
+                    st.success("✅ VAST Tag Başarıyla Çözümlendi!")
+                    
+                    st.markdown("### 📊 VAST Analiz Sonuçları")
+                    v_col1, v_col2 = st.columns(2)
+                    with v_col1:
+                        st.metric(label="⏱️ Video Süresi (Duration)", value=result['duration'])
+                    with v_col2:
+                        st.metric(label="📹 Tespit Edilen Video Sayısı", value=len(result['videos']))
+                    
+                    st.markdown("#### 🎥 Tespit Edilen Medya Dosyaları (MediaFiles)")
+                    for idx, vid in enumerate(result['videos'], 1):
+                        with st.expander(f"Video #{idx} - {vid['width']}x{vid['height']} ({vid['type']})"):
+                            st.write(f"**Çözünürlük:** {vid['width']} x {vid['height']}")
+                            st.write(f"**Bitrate:** {vid['bitrate']}")
+                            st.write(f"**Format:** {vid['type']}")
+                            st.code(vid['url'], language="text")
+                            st.video(vid['url'])
+                else:
+                    st.error(result)
         else:
             st.warning("Lütfen geçerli bir VAST URL girin.")
 
@@ -83,11 +159,9 @@ with tab2:
         file_size_mb = uploaded_file.size / (1024 * 1024)
         st.info(f"Yüklenen Dosya Boyutu: {file_size_mb:.2f} MB")
         
-        # %0 - %100 İlerleme Çubuğu
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Adım 1
         status_text.markdown("**⏳ Dosya belleğe yükleniyor ve hazırlanıyor... (%20)**")
         progress_bar.progress(20)
         
@@ -95,39 +169,32 @@ with tab2:
             tmp_file.write(uploaded_file.read())
             tmp_path = tmp_file.name
         
-        # Adım 2: Ölçü, Süre ve Letterbox Analizi
         status_text.markdown("**📐 Video ölçüleri, süre ve Letterbox (Siyah Bant) analiz ediliyor... (%50)**")
         progress_bar.progress(50)
         time.sleep(0.3)
         
-        # Adım 3: Ses Normalizasyonu & Sıkıştırma
         status_text.markdown(f"**🔊 Ses seviyesi normalize ediliyor ({target_lufs:.2f} LUFS) & Sıkıştırılıyor... (%80)**")
         progress_bar.progress(80)
         time.sleep(0.3)
         
-        # Adım 4: Tamamlandı
         progress_bar.progress(100)
         status_text.markdown("**✅ İşlem Tamamlandı! (%100)**")
         
         st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
         st.success(f"🎉 İşlem Tamamlandı! Dosya Boyutu: {file_size_mb:.2f} MB")
         
-        # --- VİDEO ANALİZ & KONTROL KARTLARI (Ölçü, Süre, Letterbox) ---
         st.markdown("### 📊 Video QC Kontrol Sonuçları")
         qc_col1, qc_col2, qc_col3 = st.columns(3)
         
         with qc_col1:
             st.metric(label="📐 Çözünürlük / Ölçü", value="1920x1080 (16:9)", delta="Uygun (Full HD)")
-            
         with qc_col2:
             st.metric(label="⏱️ Video Süresi", value="15 Saniye", delta=f"Uygun (< {max_duration} sn)")
-            
         with qc_col3:
             st.metric(label="🖼️ Letterbox (Siyah Bant)", value="Yok (%0)", delta="Temiz Görsel")
             
         st.markdown("---")
         
-        # --- İNDİRME BUTONU VE PAYLAŞIM LİNKİ ---
         col1, col2 = st.columns([1, 1])
         
         with col1:
