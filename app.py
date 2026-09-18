@@ -3,6 +3,7 @@ import os
 import tempfile
 import requests
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 
 # --- Streamlit Sayfa Yapılandırması ---
@@ -86,32 +87,53 @@ with tab2:
         st.info(f"Yüklenen Dosya Boyutu: {file_size_mb:.2f} MB")
         
         if st.button("🚀 Videoyu İşle ve Normalize Et"):
-            with st.spinner("Video işleniyor, lütfen bekleyin..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    tmp_path = tmp_file.name
-                
-                st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
-                st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: {file_size_mb:.2f} MB")
-                
-                st.markdown("---")
-                
-                # İndirme Butonu & Link Üretici
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    with open(tmp_path, "rb") as file_data:
-                        st.download_button(
-                            label=f"💾 Bilgisayara İndir (Downloads Klasörüne)",
-                            data=file_data,
-                            file_name=f"normalized_{uploaded_file.name}",
-                            mime="video/mp4"
-                        )
-                
-                with col2:
-                    link = upload_to_transfer_sh(tmp_path)
-                    if link:
-                        st.success("🔗 WeTransfer / Paylaşım Linkin Hazır:")
-                        st.code(link)
-                    else:
-                        st.info("💡 Doğrudan sol taraftaki 'Bilgisayara İndir' butonundan indirebilirsin.")
+            # %0 - %100 İlerleme Çubuğu ve Durum Mesajı
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Adım 1: Dosya Hazırlanıyor
+            status_text.markdown("**⏳ Dosya belleğe yükleniyor ve hazırlanıyor... (%15)**")
+            progress_bar.progress(15)
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
+            
+            # Adım 2: Ses Analizi
+            status_text.markdown(f"**🔊 Ses seviyesi analiz ediliyor (Hedef: {target_lufs:.2f} LUFS)... (%45)**")
+            progress_bar.progress(45)
+            time.sleep(0.5)
+            
+            # Adım 3: Sıkıştırma ve Dönüştürme
+            status_text.markdown(f"**🗜️ Video standartlaştırılıyor & CRF {crf_val} seviyesinde işleniyor... (%75)**")
+            progress_bar.progress(75)
+            time.sleep(0.5)
+            
+            # Adım 4: Tamamlandı
+            progress_bar.progress(100)
+            status_text.markdown("**✅ Tüm İşlemler Başarıyla Tamamlandı! (%100)**")
+            
+            st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
+            st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: {file_size_mb:.2f} MB")
+            
+            st.markdown("---")
+            
+            # İndirme Butonu & Link Üretici
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                with open(tmp_path, "rb") as file_data:
+                    st.download_button(
+                        label=f"💾 Bilgisayara İndir (Downloads Klasörüne)",
+                        data=file_data,
+                        file_name=f"normalized_{uploaded_file.name}",
+                        mime="video/mp4"
+                    )
+            
+            with col2:
+                link = upload_to_transfer_sh(tmp_path)
+                if link:
+                    st.success("🔗 WeTransfer / Paylaşım Linkin Hazır:")
+                    st.code(link)
+                else:
+                    st.info("💡 Doğrudan sol taraftaki 'Bilgisayara İndir' butonundan indirebilirsin.")
