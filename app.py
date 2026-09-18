@@ -5,8 +5,14 @@ import tempfile
 import requests
 import subprocess
 import re
-from google.cloud import bigquery
-from google.oauth2 import service_account
+
+# BigQuery kütüphanesini güvenli içe aktarma
+try:
+    from google.cloud import bigquery
+    from google.oauth2 import service_account
+    HAS_BIGQUERY = True
+except ImportError:
+    HAS_BIGQUERY = False
 
 # --- Streamlit Sayfa Yapılandırması ---
 st.set_page_config(
@@ -72,8 +78,11 @@ def analyze_video_ffmpeg(video_path):
     return lufs_val, has_letterbox
 
 # --- BIGQUERY CANLI VERİ ÇEKME FONKSİYONU ---
-@st.cache_data(ttl=1800) # Veriyi 30 dk önbellekte tutar
+@st.cache_data(ttl=1800)
 def fetch_bigquery_data():
+    if not HAS_BIGQUERY:
+        return None, "google-cloud-bigquery kütüphanesi yüklenemedi. Lütfen requirements.txt dosyasını kontrol edin."
+        
     try:
         if "gcp_service_account" in st.secrets:
             creds = service_account.Credentials.from_service_account_info(
