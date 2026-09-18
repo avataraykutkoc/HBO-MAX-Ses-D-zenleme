@@ -6,7 +6,7 @@ import requests
 import subprocess
 import re
 
-# BigQuery kütüphanesini güvenli içe aktarma
+# BigQuery Güvenli İçe Aktarma
 try:
     from google.cloud import bigquery
     from google.oauth2 import service_account
@@ -81,13 +81,20 @@ def analyze_video_ffmpeg(video_path):
 @st.cache_data(ttl=1800)
 def fetch_bigquery_data():
     if not HAS_BIGQUERY:
-        return None, "google-cloud-bigquery kütüphanesi yüklenemedi. Lütfen requirements.txt dosyasını kontrol edin."
+        return None, "google-cloud-bigquery kütüphanesi hazır değil."
         
     try:
+        creds = None
+        # Secrets alanında gcp_service_account varsa kullan, yoksa anonim/default dene
         if "gcp_service_account" in st.secrets:
-            creds = service_account.Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"]
-            )
+            try:
+                creds = service_account.Credentials.from_service_account_info(
+                    dict(st.secrets["gcp_service_account"])
+                )
+            except Exception:
+                creds = None
+
+        if creds:
             client = bigquery.Client(credentials=creds, project="hb-dataanalytics-prod")
         else:
             client = bigquery.Client(project="hb-dataanalytics-prod")
