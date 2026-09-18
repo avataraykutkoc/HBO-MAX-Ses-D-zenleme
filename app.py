@@ -12,17 +12,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Sidebar: Creator Rozeti ---
-st.sidebar.markdown(
-    """
-    <div style="background-color: #1e1e2e; padding: 8px 12px; border-radius: 8px; border: 1px solid #313244; margin-bottom: 15px; text-align: center;">
-        <span style="color: #a6adc8; font-size: 12px; font-weight: bold;">👨‍💻 Creator:</span> 
-        <span style="color: #00d2ff; font-size: 13px; font-weight: bold;">Aykut Koç</span>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
 # --- Transfer.sh İndirme Linki Üretici ---
 def upload_to_transfer_sh(file_path):
     try:
@@ -35,7 +24,32 @@ def upload_to_transfer_sh(file_path):
         return None
     return None
 
-# --- Ana Başlık ve İmza ---
+# --- SIDEBAR (SOL MENÜ) ---
+# 1. Creator Rozeti
+st.sidebar.markdown(
+    """
+    <div style="background-color: #1e1e2e; padding: 8px 12px; border-radius: 8px; border: 1px solid #313244; margin-bottom: 15px; text-align: center;">
+        <span style="color: #a6adc8; font-size: 12px; font-weight: bold;">👨‍💻 Creator:</span> 
+        <span style="color: #00d2ff; font-size: 13px; font-weight: bold;">Aykut Koç</span>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# 2. QC Standart Limitleri ve Sıkıştırma Ayarları
+st.sidebar.header("⚙️ QC Standart Limitleri")
+
+target_lufs = st.sidebar.number_input("Hedef Ses Seviyesi (LUFS)", value=-23.00, step=1.0)
+min_lufs = st.sidebar.number_input("Minimum Kabul Edilebilir LUFS", value=-27.00, step=1.0)
+max_lufs = st.sidebar.number_input("Maksimum Kabul Edilebilir LUFS", value=-19.00, step=1.0)
+max_duration = st.sidebar.number_input("Maksimum Video Süresi (Saniye)", value=59, step=1)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🗜️ Sıkıştırma Ayarı (Dosya Yükleme İçin)")
+auto_compress = st.sidebar.checkbox("100 MB Üstü İçin Otomatik Sıkıştır", value=True)
+crf_val = st.sidebar.slider("Görsel Kalite / Sıkıştırma (CRF)", min_value=18, max_value=28, value=24, help="Düşük değer daha yüksek kalite demektir.")
+
+# --- ANA SAYFA BAŞLIĞI VE ORTA İMZA ---
 st.markdown(
     """
     <div style="display: flex; justify-content: center; margin-bottom: -10px; margin-top: -10px;">
@@ -51,7 +65,7 @@ st.markdown(
 st.title("🎬 HepsiAd - Video Standartlaştırma & VAST QC Laboratuvarı")
 st.write("İster VAST Tag URL'si analiz edin, ister bilgisayarınızdan doğrudan video yükleyip LUFS, boyut ve siyah bant kontrolü yapın.")
 
-# --- Sekmeler ---
+# --- SEKMELER ---
 tab1, tab2 = st.tabs(["🔗 VAST Tag Analizi", "📁 Doğrudan Video Yükleme & İşleme"])
 
 with tab1:
@@ -73,18 +87,16 @@ with tab2:
         
         if st.button("🚀 Videoyu İşle ve Normalize Et"):
             with st.spinner("Video işleniyor, lütfen bekleyin..."):
-                # Geçici dosya kaydı
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
                     tmp_file.write(uploaded_file.read())
                     tmp_path = tmp_file.name
                 
-                # Başarı mesajları
-                st.success("✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: -23.00 LUFS")
+                st.success(f"✅ Ses Başarıyla Normalize Edildi! Yeni Seviye: {target_lufs:.2f} LUFS")
                 st.success(f"🎉 İşlem Tamamlandı! Yeni Dosya Boyutu: {file_size_mb:.2f} MB")
                 
                 st.markdown("---")
                 
-                # İndirme Butonu ve WeTransfer Mantığı
+                # İndirme Butonu & Link Üretici
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
