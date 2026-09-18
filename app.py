@@ -1,3 +1,19 @@
+import streamlit as st
+import os
+import tempfile
+import requests
+import subprocess
+import xml.etree.ElementTree as ET
+
+st.sidebar.markdown(
+    """
+    <div style="background-color: #1e1e2e; padding: 8px 12px; border-radius: 8px; border: 1px solid #313244; margin-bottom: 15px; text-align: center;">
+        <span style="color: #a6adc8; font-size: 12px; font-weight: bold;">👨‍💻 Creator:</span> 
+        <span style="color: #00d2ff; font-size: 13px; font-weight: bold;">Aykut Koç</span>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 import os
 import tempfile
 import requests
