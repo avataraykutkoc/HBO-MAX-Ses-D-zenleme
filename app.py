@@ -13,8 +13,37 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- Üst İmza / Geliştirici Bilgisi ---
+st.caption("🚀 Developed with ❤️ by **Aykut Koç** | HepsiAd Video & VAST QC Tool")
 st.title("🎬 HepsiAd Video & VAST Kontrol Merkezi")
 st.markdown("Video dosyalarının ve VAST etiketlerinin kalite ve uyumluluk kontrollerini yapabilirsiniz.")
+
+# --- Sol Yan Menü (Sidebar - Teknik Detaylar ve Kurallar) ---
+with st.sidebar:
+    st.header("📋 Teknik Kriterler & Standartlar")
+    
+    st.subheader("🎥 Video QC Standartları")
+    st.markdown("""
+    * **Format:** MP4, MOV, MKV
+    * **Video Codec:** H.264 / AVC
+    * **Çözünürlük:** Min. 1080p (1920x1080)
+    * **Kare Hızı (FPS):** 25 fps veya 30 fps
+    * **Maks. Dosya Boyutu:** 200 MB
+    * **Ses (Audio):** AAC, 48kHz, Stereo (-24 LKFS nominal)
+    """)
+    
+    st.divider()
+    
+    st.subheader("🔗 VAST Etiket Standartları")
+    st.markdown("""
+    * **Versiyon:** VAST 2.0 / 3.0 / 4.0 uyumlu
+    * **Protokol:** HTTPS zorunlu
+    * **Medya Türü:** Doğrudan MP4 / M4V `MediaFile` düğümü içermelidir.
+    * **Yanıt Süresi:** < 1.5 saniye
+    """)
+    
+    st.divider()
+    st.info("💡 Herhangi bir sorun veya geliştirme talebi için **Aykut Koç** ile iletişime geçebilirsiniz.")
 
 # --- Sekme Yapısı ---
 tab_video, tab_vast = st.tabs(["🎥 Video Kontrolü (QC)", "🔗 VAST Kontrolü"])
@@ -44,7 +73,7 @@ with tab_video:
                     ]
                     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     
-                    st.subheader("Video Özellikleri")
+                    st.subheader("Video Özellikleri ve Detaylar")
                     st.code(result.stdout)
                     st.success("Analiz başarıyla tamamlandı!")
                 except Exception as e:
