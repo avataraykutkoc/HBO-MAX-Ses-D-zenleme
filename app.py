@@ -16,7 +16,7 @@ with col_title:
 with col_author:
     st.markdown("""
         <div style="background-color: #1E293B; padding: 10px; border-radius: 10px; border: 1px solid #3B82F6; text-align: center;">
-            <p style="margin: 0; size: 12px; color: #94A3B8;">HepsiAd Tech</p>
+            <p style="margin: 0; font-size: 11px; color: #94A3B8;">HepsiAd Tech Portal</p>
             <p style="margin: 0; font-weight: bold; color: #38BDF8;">👨‍💻 Creator: Aykut Koç</p>
         </div>
     """, unsafe_allow_html=True)
@@ -24,30 +24,51 @@ with col_author:
 tab1, tab2, tab3 = st.tabs([
     "📁 Doğrudan Video & Ses Normalizasyonu", 
     "📊 BigQuery P1 Merchant Paneli", 
-    "🔗 VAST Tag Analizi & LUFS Sorgusu"
+    "🔗 VAST Tag Analizi, VPAID & LUFS Sorgusu"
 ])
 
 def get_audio_lufs(video_input):
-    """FFmpeg ebur128 filtresi ile videonun Integrated LUFS ses seviyesini ölçer."""
+    """Video URL'si veya yerel dosyadan ses indirip LUFS seviyesini doğru ölçer."""
+    temp_file = None
     try:
-        # Eğer video URL ise veya yerel dosya ise
+        # Eğer input bir internet URL'si ise geçici dosyaya indir
+        if video_input.startswith("http"):
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            req = requests.get(video_input, headers=headers, stream=True, timeout=15)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+                for chunk in req.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        tmp.write(chunk)
+                temp_file = tmp.name
+            target_path = temp_file
+        else:
+            target_path = video_input
+
+        # FFmpeg ile EBU R128 LUFS ölçümü
         cmd = [
-            "ffmpeg", "-nostats", "-i", video_input,
+            "ffmpeg", "-nostats", "-i", target_path,
             "-filter_complex", "ebur128=peak=true",
             "-f", "null", "-"
         ]
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, timeout=15)
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, timeout=25)
         output = result.stderr
-        
+
+        lufs_val = None
         for line in output.split('\n'):
             if "I:" in line and "LUFS" in line:
                 parts = line.split("I:")
                 if len(parts) > 1:
-                    lufs_val = parts[1].split("LUFS")[0].strip()
-                    return float(lufs_val)
+                    val_str = parts[1].split("LUFS")[0].strip()
+                    lufs_val = float(val_str)
+
+        if temp_file and os.path.exists(temp_file):
+            os.remove(temp_file)
+
+        return lufs_val
     except Exception:
-        pass
-    return None
+        if temp_file and os.path.exists(temp_file):
+            os.remove(temp_file)
+        return None
 
 # ---------------------------------------------------------
 # TAB 1: VİDEO NORMALİZASYONU & SES DÜZENLEME (-23 LUFS)
@@ -199,7 +220,7 @@ with tab3:
 
                         impressions = [imp.text.strip() for imp in root.findall(".//Impression") if imp.text]
 
-                        # VAST Video Ses LUFS Ölçümü
+                        # VAST Video Ses LUFS Gerçek Ölçümü
                         vast_lufs = None
                         if target_video_url:
                             vast_lufs = get_audio_lufs(target_video_url)
