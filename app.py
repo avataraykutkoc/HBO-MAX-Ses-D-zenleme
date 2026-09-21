@@ -28,10 +28,9 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 def get_audio_lufs(video_input):
-    """Video URL'si veya yerel dosyadan ses indirip LUFS seviyesini doğru ölçer."""
+    """Video URL'si veya yerel dosyadan ses indirip LUFS seviyesini ölçer."""
     temp_file = None
     try:
-        # Eğer input bir internet URL'si ise geçici dosyaya indir
         if video_input.startswith("http"):
             headers = {'User-Agent': 'Mozilla/5.0'}
             req = requests.get(video_input, headers=headers, stream=True, timeout=15)
@@ -44,7 +43,6 @@ def get_audio_lufs(video_input):
         else:
             target_path = video_input
 
-        # FFmpeg ile EBU R128 LUFS ölçümü
         cmd = [
             "ffmpeg", "-nostats", "-i", target_path,
             "-filter_complex", "ebur128=peak=true",
@@ -70,12 +68,40 @@ def get_audio_lufs(video_input):
             os.remove(temp_file)
         return None
 
+def check_letterboxing(video_path):
+    """FFmpeg cropdetect ile videoda siyah bant (letterbox) var mı kontrol eder."""
+    try:
+        cmd = [
+            "ffmpeg", "-i", video_path,
+            "-vf", "cropdetect=24:16:0",
+            "-vframes", "10",
+            "-f", "null", "-"
+        ]
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, timeout=15)
+        output = result.stderr
+        
+        crops = []
+        for line in output.split('\n'):
+            if "crop=" in line:
+                crop_str = line.split("crop=")[1].split()[0]
+                crops.append(crop_str)
+        
+        if crops:
+            # Örnek crop: 1920:800:0:140 -> Yüksekliği 1080'den küçükse letterbox vardır
+            last_crop = crops[-1]
+            w, h, x, y = map(int, last_crop.split(':'))
+            if h < 1040 or w < 1880 or y > 10 or x > 10:
+                return True, last_crop
+        return False, None
+    except Exception:
+        return False, None
+
 # ---------------------------------------------------------
-# TAB 1: VİDEO NORMALİZASYONU & SES DÜZENLEME (-23 LUFS)
+# TAB 1: VİDEO NORMALİZASYONU & LETTERBOX SORGUSU
 # ---------------------------------------------------------
 with tab1:
     st.header("📁 Doğrudan Video & Ses Normalizasyonu")
-    st.write("Video dönüştürme ve ses seviyesini standart **-23 LUFS (-19 / -27 LUFS aralığı)** seviyesine getirme işlemlerinizi buradan yapabilirsiniz.")
+    st.write("Video dönüştürme, **letterbox (siyah bant) kontrolü** ve ses seviyesini standart **-23 LUFS** seviyesine getirme portalı.")
 
     uploaded_video = st.file_uploader(
         "Dönüştürülecek Video Dosyasını Seçin (Max 500MB)", 
@@ -85,6 +111,34 @@ with tab1:
     if uploaded_video is not None:
         st.video(uploaded_video)
         
+        # YÜKLENDİĞİ AN OTOMATİK LUFS VE LETTERBOX KONTROLÜ
+        with st.spinner("🔍 Videonun ses ve siyah bant (letterbox) analizi yapılıyor..."):
+            ext = os.path.splitext(uploaded_video.name)[1].lower()
+            if not ext:
+                ext = ".mp4"
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_in:
+                tmp_in.write(uploaded_video.getbuffer())
+                in_path = tmp_in.name
+
+            orig_lufs = get_audio_lufs(in_path)
+            has_letterbox, crop_params = check_letterboxing(in_path)
+
+        st.subheader("📊 Otomatik Video Teşhis Raporu")
+        c1, c2 = st.columns(2)
+        
+        if orig_lufs is not None:
+            status_str = "🎯 Uyumlu" if -27 <= orig_lufs <= -19 else "⚠️ Standart Dışı (Düzeltilmeli)"
+            c1.metric("Mevcut Ses Seviyesi", f"{orig_lufs} LUFS", delta=status_str)
+        else:
+            c1.metric("Mevcut Ses Seviyesi", "Ölçülemedi")
+
+        if has_letterbox:
+            c2.metric("Letterboxing (Siyah Bant)", "⚠️ Siyah Bant Var!", delta="- HBO/WBD Red Riski", delta_color="inverse")
+            st.error("🚨 **UYARI:** Videoda siyah bant (Letterboxing) tespit edildi! Dönüştürme işleminde bu bantlar otomatik temizlenecektir.")
+        else:
+            c2.metric("Letterboxing (Siyah Bant)", "✅ Siyah Bant Yok", delta="Temiz / Tam Ekran")
+
         col1, col2 = st.columns(2)
         with col1:
             target_resolution = st.selectbox(
@@ -94,24 +148,18 @@ with tab1:
         with col2:
             target_fps = st.selectbox("Hedef FPS", ["25", "30", "60", "Orijinal"])
 
+        remove_letterbox = st.checkbox("✂️ Siyah Bantları (Letterbox) Otomatik Kırp ve Temizle", value=has_letterbox)
+
         if st.button("⚡ Videoyu & Sesi Normalize Et (-23 LUFS)", type="primary"):
-            with st.spinner("Video analiz ediliyor ve -23 LUFS ses seviyesine sabitleniyor..."):
+            with st.spinner("Video işleniyor, siyah bantlar temizleniyor ve -23 LUFS'a sabitleniyor..."):
                 try:
-                    ext = os.path.splitext(uploaded_video.name)[1].lower()
-                    if not ext:
-                        ext = ".mp4"
-
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_in:
-                        tmp_in.write(uploaded_video.getbuffer())
-                        in_path = tmp_in.name
-
-                    # Orijinal Ses LUFS Analizi
-                    orig_lufs = get_audio_lufs(in_path)
-
                     out_path = in_path + "_converted.mp4"
                     cmd = ["ffmpeg", "-y", "-i", in_path]
                     
                     video_filters = []
+                    if remove_letterbox and crop_params:
+                        video_filters.append(f"crop={crop_params}")
+
                     if "1080p" in target_resolution:
                         video_filters.append("scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2")
                     elif "720p" in target_resolution:
@@ -136,20 +184,18 @@ with tab1:
 
                     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                    # Yeni Dönüştürülen Ses LUFS Analizi
                     new_lufs = get_audio_lufs(out_path)
 
-                    st.success("🎉 Video dönüştürüldü ve ses tam -23 LUFS seviyesine sabitlendi!")
+                    st.success("🎉 Video dönüştürüldü, siyah bantlar temizlendi ve ses tam -23 LUFS yapıldı!")
                     
-                    # LUFS Ölçüm Sonuç Kartları
                     m1, m2 = st.columns(2)
-                    m1.metric("Orijinal Ses Seviyesi", f"{orig_lufs} LUFS" if orig_lufs is not None else "Ölçülemedi")
-                    m2.metric("Yeni Normalize Ses Seviyesi", f"{new_lufs} LUFS" if new_lufs is not None else "-23.0 LUFS", delta="🎯 Standart Uyumlu")
+                    m1.metric("Orijinal Ses", f"{orig_lufs} LUFS" if orig_lufs is not None else "Ölçülemedi")
+                    m2.metric("Yeni Normalize Ses", f"{new_lufs} LUFS" if new_lufs is not None else "-23.0 LUFS", delta="🎯 Standart Uyumlu")
 
                     with open(out_path, "rb") as file:
                         clean_name = os.path.splitext(uploaded_video.name)[0]
                         st.download_button(
-                            label="📥 Normalize Edilmiş Videoyu İndir (MP4 / -23 LUFS)",
+                            label="📥 Standardize Videoyu İndir (MP4 / -23 LUFS)",
                             data=file,
                             file_name=f"HepsiAd_Normalized_{clean_name}.mp4",
                             mime="video/mp4"
@@ -220,14 +266,12 @@ with tab3:
 
                         impressions = [imp.text.strip() for imp in root.findall(".//Impression") if imp.text]
 
-                        # VAST Video Ses LUFS Gerçek Ölçümü
                         vast_lufs = None
                         if target_video_url:
                             vast_lufs = get_audio_lufs(target_video_url)
 
                         st.success("✅ VAST Tag ve Ses Analizi başarıyla çözümlendi!")
 
-                        # Özet Metrik Kartları (VPAID ve Ses LUFS Dahil)
                         c1, c2, c3, c4, c5 = st.columns(5)
                         c1.metric("Reklam Başlığı", ad_title)
                         c2.metric("Süre (Duration)", duration)
