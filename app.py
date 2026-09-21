@@ -17,13 +17,12 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ---------------------------------------------------------
-# TAB 1: VİDEO NORMALİZASYONU (MPG / MPEG DESTEKLİ)
+# TAB 1: VİDEO NORMALİZASYONU & SES DÜZENLEME (-23 LUFS)
 # ---------------------------------------------------------
 with tab1:
-    st.header("📁 Doğrudan Video Normalizasyonu")
-    st.write("Video dönüştürme, ses normalizasyonu (-23 LUFS) ve standartlaştırma işlemlerinizi buradan yapabilirsiniz.")
+    st.header("📁 Doğrudan Video & Ses Normalizasyonu")
+    st.write("Video dönüştürme ve ses seviyesini standart **-23 LUFS (-19 / -27 LUFS aralığı)** seviyesine getirme işlemlerinizi buradan yapabilirsiniz.")
 
-    # MPG ve MPEG uzantıları eklendi!
     uploaded_video = st.file_uploader(
         "Dönüştürülecek Video Dosyasını Seçin (Max 500MB)", 
         type=["mp4", "mov", "avi", "mkv", "webm", "mpg", "mpeg"]
@@ -41,10 +40,9 @@ with tab1:
         with col2:
             target_fps = st.selectbox("Hedef FPS", ["25", "30", "60", "Orijinal"])
 
-        if st.button("⚡ Videoyu Normalize Et / Dönüştür", type="primary"):
-            with st.spinner("Video işleniyor ve MP4 formatına dönüştürülüyor, lütfen bekleyin..."):
+        if st.button("⚡ Videoyu & Sesi Normalize Et (-23 LUFS)", type="primary"):
+            with st.spinner("Video işleniyor ve ses seviyesi -23 LUFS'a sabitleniyor, lütfen bekleyin..."):
                 try:
-                    # Girdi dosyasını geçici alana güvenle yaz
                     ext = os.path.splitext(uploaded_video.name)[1].lower()
                     if not ext:
                         ext = ".mp4"
@@ -55,44 +53,55 @@ with tab1:
 
                     out_path = in_path + "_converted.mp4"
 
-                    # FFmpeg dönüştürme komutu
                     cmd = ["ffmpeg", "-y", "-i", in_path]
                     
-                    filters = []
+                    # Video Filtreleri
+                    video_filters = []
                     if "1080p" in target_resolution:
-                        filters.append("scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2")
+                        video_filters.append("scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2")
                     elif "720p" in target_resolution:
-                        filters.append("scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2")
+                        video_filters.append("scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2")
 
-                    if filters:
-                        cmd.extend(["-vf", ",".join(filters)])
+                    if video_filters:
+                        cmd.extend(["-vf", ",".join(video_filters)])
 
                     if target_fps != "Orijinal":
                         cmd.extend(["-r", target_fps])
 
-                    # H.264 video + AAC ses kodlaması (Gerçek MP4 standartları)
-                    cmd.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", out_path])
+                    # SES NORMALİZASYONU FILTRESİ (-23 LUFS Target, -19/-27 Tolere Aralığı)
+                    # I=-23: Target Integrated Loudness (-23 LUFS)
+                    # LRA=7: Loudness Range
+                    # TP=-1.0: Maximum True Peak (-1.0 dBTP)
+                    audio_filter = "loudnorm=I=-23:LRA=7:TP=-1.0"
+
+                    cmd.extend([
+                        "-c:v", "libx264", 
+                        "-pix_fmt", "yuv420p", 
+                        "-af", audio_filter, 
+                        "-c:a", "aac", 
+                        "-b:a", "192k", 
+                        out_path
+                    ])
 
                     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                    st.success("🎉 Video ve ses başarıyla normalize edildi & MP4 yapıldı!")
+                    st.success("🎉 Video dönüştürüldü ve ses tam -23 LUFS seviyesine sabitlendi!")
                     
                     with open(out_path, "rb") as file:
                         clean_name = os.path.splitext(uploaded_video.name)[0]
                         st.download_button(
-                            label="📥 Standartlaştırılmış MP4 Videoyu İndir",
+                            label="📥 Normalize Edilmiş Videoyu İndir (MP4 / -23 LUFS)",
                             data=file,
                             file_name=f"HepsiAd_Normalized_{clean_name}.mp4",
                             mime="video/mp4"
                         )
 
-                    # Geçici dosyaları temizle
                     os.remove(in_path)
                     if os.path.exists(out_path):
                         os.remove(out_path)
 
                 except Exception as e:
-                    st.error(f"❌ Video işlenirken hata oluştu: {e}")
+                    st.error(f"❌ İşlem sırasında hata oluştu: {e}")
 
 # ---------------------------------------------------------
 # TAB 2: BIGQUERY
