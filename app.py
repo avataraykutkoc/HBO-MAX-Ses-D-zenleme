@@ -90,17 +90,17 @@ def check_letterboxing(video_path):
             last_crop = crops[-1]
             w, h, x, y = map(int, last_crop.split(':'))
             if h < 1040 or w < 1880 or y > 10 or x > 10:
-                return True, last_crop
-        return False, None
+                return True
+        return False
     except Exception:
-        return False, None
+        return False
 
 # ---------------------------------------------------------
-# TAB 1: TAM OTOMATİK VİDEO NORMALİZASYONU
+# TAB 1: TAM OTOMATİK VİDEO NORMALİZASYONU (LETTERBOX DOKUNMASIZ)
 # ---------------------------------------------------------
 with tab1:
     st.header("📁 Orijinal Video Yükleme")
-    st.write("Video yüklediğiniz an **otomatik olarak** dönüştürülür, siyah bantlar temizlenir ve ses **-23 LUFS** standartlarına getirilir.")
+    st.write("Video yüklediğiniz an **otomatik olarak** ses seviyesi **-23 LUFS** standartlarına getirilir, siyah bant varsa sadece **bilgi uyarısı** verilir (videoya dokunulmaz).")
 
     uploaded_video = st.file_uploader(
         "Dönüştürülecek Video Dosyasını Bırakın (Max 500MB)", 
@@ -110,8 +110,7 @@ with tab1:
     if uploaded_video is not None:
         st.video(uploaded_video)
         
-        # SIFIR TIKLAMA - TAM OTOMATİK İŞLEME SÜRECİ
-        with st.spinner("⚡ Video otomatik olarak analiz ediliyor, siyah bantlar kırpılıyor ve ses -23 LUFS yapılıyor..."):
+        with st.spinner("⚡ Video analiz ediliyor, ses -23 LUFS seviyesine sabitleniyor..."):
             try:
                 ext = os.path.splitext(uploaded_video.name)[1].lower()
                 if not ext:
@@ -123,19 +122,13 @@ with tab1:
 
                 # 1. Teşhis Analizleri
                 orig_lufs = get_audio_lufs(in_path)
-                has_letterbox, crop_params = check_letterboxing(in_path)
+                has_letterbox = check_letterboxing(in_path)
 
                 out_path = in_path + "_converted.mp4"
                 cmd = ["ffmpeg", "-y", "-i", in_path]
                 
-                # 2. Otomatik Filtreler (Kırpma + 1080p Standartlaştırma)
-                video_filters = []
-                if has_letterbox and crop_params:
-                    video_filters.append(f"crop={crop_params}")
-
-                video_filters.append("scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2")
-                
-                cmd.extend(["-vf", ",".join(video_filters)])
+                # 2. Standart Görsel Kodlama (Siyah bant kırpma KAPALI, orijinal görüntü korunur)
+                cmd.extend(["-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"])
                 cmd.extend(["-r", "25"])  # Standart 25 FPS
 
                 # 3. Otomatik -23 LUFS Ses Normalizasyonu
@@ -154,19 +147,24 @@ with tab1:
 
                 new_lufs = get_audio_lufs(out_path)
 
-                st.success("🎉 İŞLEM TAMAMLANDI! Video ve ses %100 standartlara uygun hale getirildi.")
+                st.success("🎉 İŞLEM TAMAMLANDI! Ses seviyesi -23 LUFS yapıldı ve indirme bağlantısı hazırlandı.")
                 
                 # Otomatik Sonuç Raporu Kartları
                 r1, r2, r3 = st.columns(3)
                 r1.metric("Orijinal Ses Seviyesi", f"{orig_lufs} LUFS" if orig_lufs is not None else "Ölçülemedi")
                 r2.metric("Yeni Normalize Ses", f"{new_lufs} LUFS" if new_lufs is not None else "-23.0 LUFS", delta="🎯 Standart Uyumlu")
-                r3.metric("Letterbox (Siyah Bant)", "✂️ Temizlendi (16:9)" if has_letterbox else "✅ Bant Yoktu")
+                
+                if has_letterbox:
+                    r3.metric("Letterbox Durumu", "⚠️ Siyah Bant Var", delta="- Orijinal Şekilde Korundu", delta_color="inverse")
+                    st.warning("⚠️ **LETTERBOX UYARISI:** Videoda siyah bant (letterboxing) tespit edildi. İstediğiniz üzerine videonun orijinal kadrajına dokunulmadı, doğrudan yayına alabilirsiniz.")
+                else:
+                    r3.metric("Letterbox Durumu", "✅ Siyah Bant Yok")
 
                 # HAZIR VİDEO İNDİRME BUTONU
                 with open(out_path, "rb") as file:
                     clean_name = os.path.splitext(uploaded_video.name)[0]
                     st.download_button(
-                        label="📥 TAM STANDARTLAŞTIRILMIŞ VİDEOYU İNDİR (1080p / 25 FPS / -23 LUFS)",
+                        label="📥 NORMALIZE EDİLMİŞ VİDEOYU İNDİR (MP4 / -23 LUFS)",
                         data=file,
                         file_name=f"HepsiAd_Normalized_{clean_name}.mp4",
                         mime="video/mp4",
