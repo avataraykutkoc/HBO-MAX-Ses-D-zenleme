@@ -5,6 +5,8 @@ import os
 import subprocess
 import tempfile
 
+from vast_analyzer import render_vast_tab
+
 st.set_page_config(page_title="HepsiAd Portal", layout="wide", page_icon="🎬")
 
 st.title("🎬 HepsiAd - Video Standartlaştırma & BigQuery Analiz Portalı")
@@ -101,8 +103,4 @@ with tab2:
 # TAB 3: VAST TAG ANALİZİ
 # ---------------------------------------------------------
 with tab3:
-    st.header("🔗 VAST Tag Analizi")
-    st.write("VAST URL girerek reklam etiketlerini analiz edebilirsiniz.")
-    vast_url = st.text_input("VAST URL Girin:")
-    if st.button("VAST Tag Analiz Et"):
-        st.info("VAST Tag analiz modülü çalışıyor.")
+    render_vast_tab()
