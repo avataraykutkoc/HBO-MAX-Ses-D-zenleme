@@ -6,25 +6,12 @@ import requests
 import subprocess
 import re
 
-# --- Streamlit Sayfa Yapılandırması (Sol Menü Her Zaman Açık) ---
+# --- Streamlit Sayfa Yapılandırması (Sol Menüyü Açık Başlatır) ---
 st.set_page_config(
     page_title="HepsiAd Video QC & VAST Laboratuvarı",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
-)
-
-# --- Sol Menünün Kapatılmasını Tamamen Engelleyen CSS ---
-st.markdown(
-    """
-    <style>
-        /* Sol menünün kapalı başlama ihtimalini ve kapatma butonunu engeller */
-        [data-testid="stSidebarCollapseButton"] {
-            display: none !important;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
 )
 
 # --- Üst İmza / Geliştirici Bilgisi ---
