@@ -5,29 +5,38 @@ import os
 import subprocess
 import tempfile
 import requests
-import json
 import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="HepsiAd Portal", layout="wide", page_icon="🎬")
 
-st.title("🎬 HepsiAd - Video Standartlaştırma & BigQuery Analiz Portalı")
-st.caption("👨‍💻 Creator: Aykut Koç")
+# Aykut Koç İmza Başlığı
+col_title, col_author = st.columns([3, 1])
+with col_title:
+    st.title("🎬 HepsiAd - Video Standartlaştırma & BigQuery Analiz Portalı")
+with col_author:
+    st.markdown("""
+        <div style="background-color: #1E293B; padding: 10px; border-radius: 10px; border: 1px solid #3B82F6; text-align: center;">
+            <p style="margin: 0; size: 12px; color: #94A3B8;">HepsiAd Tech</p>
+            <p style="margin: 0; font-weight: bold; color: #38BDF8;">👨‍💻 Creator: Aykut Koç</p>
+        </div>
+    """, unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs([
     "📁 Doğrudan Video & Ses Normalizasyonu", 
     "📊 BigQuery P1 Merchant Paneli", 
-    "🔗 VAST Tag Analizi"
+    "🔗 VAST Tag Analizi & LUFS Sorgusu"
 ])
 
-def get_audio_lufs(video_path):
+def get_audio_lufs(video_input):
     """FFmpeg ebur128 filtresi ile videonun Integrated LUFS ses seviyesini ölçer."""
     try:
+        # Eğer video URL ise veya yerel dosya ise
         cmd = [
-            "ffmpeg", "-nostats", "-i", video_path,
+            "ffmpeg", "-nostats", "-i", video_input,
             "-filter_complex", "ebur128=peak=true",
             "-f", "null", "-"
         ]
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, timeout=15)
         output = result.stderr
         
         for line in output.split('\n'):
@@ -113,8 +122,8 @@ with tab1:
                     
                     # LUFS Ölçüm Sonuç Kartları
                     m1, m2 = st.columns(2)
-                    m1.metric("Orijinal Ses Seviyesi", f"{orig_lufs} LUFS" if orig_lufs else "Tespit Edilemedi")
-                    m2.metric("Yeni Normalize Ses Seviyesi", f"{new_lufs} LUFS" if new_lufs else "-23.0 LUFS", delta="🎯 Standart Uyumlu")
+                    m1.metric("Orijinal Ses Seviyesi", f"{orig_lufs} LUFS" if orig_lufs is not None else "Ölçülemedi")
+                    m2.metric("Yeni Normalize Ses Seviyesi", f"{new_lufs} LUFS" if new_lufs is not None else "-23.0 LUFS", delta="🎯 Standart Uyumlu")
 
                     with open(out_path, "rb") as file:
                         clean_name = os.path.splitext(uploaded_video.name)[0]
@@ -140,17 +149,17 @@ with tab2:
     st.info("BigQuery entegrasyon paneli aktif.")
 
 # ---------------------------------------------------------
-# TAB 3: GERÇEK VAST TAG ANALİZİ & VPAID SORGUSU
+# TAB 3: VAST TAG ANALİZİ, VPAID VE LUFS SORGUSU
 # ---------------------------------------------------------
 with tab3:
-    st.header("🔗 VAST Tag Analizi & VPAID Sorgusu")
-    st.write("VAST URL'inizi yapıştırarak VPAID varlığını, reklam medyalarını ve doğruluk parametrelerini analiz edebilirsiniz.")
+    st.header("🔗 VAST Tag Analizi, VPAID & Ses LUFS Sorgusu")
+    st.write("VAST URL'inizi yapıştırarak VPAID varlığını, video çözünürlüğünü ve **gerçek zamanlı ses LUFS seviyesini** sorgulayabilirsiniz.")
     
     vast_url = st.text_input("VAST URL Girin:", placeholder="https://ad.doubleclick.net/ddm/pfadx/...")
     
-    if st.button("🔍 VAST Tag Analiz Et", type="primary"):
+    if st.button("🔍 VAST Tag & Ses LUFS Analiz Et", type="primary"):
         if vast_url:
-            with st.spinner("VAST XML yanıtı çekiliyor ve VPAID / Medya sorgusu yapılıyor..."):
+            with st.spinner("VAST XML yanıtı çekiliyor, VPAID ve Ses LUFS seviyesi ölçülüyor..."):
                 try:
                     cleaned_url = vast_url.replace("[timestamp]", "123456789")
                     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -165,14 +174,19 @@ with tab3:
                         
                         media_files = []
                         has_vpaid = False
+                        target_video_url = None
 
                         for media in root.findall(".//MediaFile"):
                             api_framework = media.attrib.get("apiFramework", "").upper()
                             type_attr = media.attrib.get("type", "").lower()
+                            m_url = media.text.strip() if media.text else "N/A"
                             
                             is_vpaid_element = ("VPAID" in api_framework) or ("vpaid" in type_attr) or ("javascript" in type_attr)
                             if is_vpaid_element:
                                 has_vpaid = True
+
+                            if ("mp4" in type_attr or m_url.endswith(".mp4")) and not target_video_url:
+                                target_video_url = m_url
 
                             media_files.append({
                                 "Type": media.attrib.get("type", "N/A"),
@@ -180,24 +194,38 @@ with tab3:
                                 "VPAID mi?": "⚠️ EVET" if is_vpaid_element else "✅ HAYIR",
                                 "Bitrate": media.attrib.get("bitrate", "N/A"),
                                 "Dimensions": f"{media.attrib.get('width', '0')}x{media.attrib.get('height', '0')}",
-                                "URL": media.text.strip() if media.text else "N/A"
+                                "URL": m_url
                             })
 
                         impressions = [imp.text.strip() for imp in root.findall(".//Impression") if imp.text]
 
-                        st.success("✅ VAST Tag başarıyla çözümlendi!")
+                        # VAST Video Ses LUFS Ölçümü
+                        vast_lufs = None
+                        if target_video_url:
+                            vast_lufs = get_audio_lufs(target_video_url)
 
-                        # Özet Metrik Kartları (VPAID Durumu Dahil)
-                        c1, c2, c3, c4 = st.columns(4)
+                        st.success("✅ VAST Tag ve Ses Analizi başarıyla çözümlendi!")
+
+                        # Özet Metrik Kartları (VPAID ve Ses LUFS Dahil)
+                        c1, c2, c3, c4, c5 = st.columns(5)
                         c1.metric("Reklam Başlığı", ad_title)
                         c2.metric("Süre (Duration)", duration)
-                        c3.metric("Medya Dosyası Adedi", len(media_files))
+                        c3.metric("Medya Dosyası", f"{len(media_files)} Adet")
                         
                         if has_vpaid:
-                            c4.metric("VPAID Durumu", "⚠️ VPAID İçeriyor", delta="- HBO Max Uyarısı", delta_color="inverse")
-                            st.error("🚨 **UYARI:** Bu VAST Tag içerisinde **VPAID (JavaScript/Interactive)** bileşenler tespit edildi! Yayıncı kuralları gereği (ör. HBO MAX) VPAID içeren etiketler reddedilebilir.")
+                            c4.metric("VPAID Durumu", "⚠️ VPAID Var", delta="- Uyumsuz", delta_color="inverse")
                         else:
-                            c4.metric("VPAID Durumu", "✅ VPAID Yok", delta="Temiz / MP4")
+                            c4.metric("VPAID Durumu", "✅ VPAID Yok", delta="Temiz MP4")
+
+                        if vast_lufs is not None:
+                            status_delta = "🎯 Uyumlu (-23 LUFS)" if -27 <= vast_lufs <= -19 else "⚠️ Standart Dışı"
+                            c5.metric("Ses Seviyesi (LUFS)", f"{vast_lufs} LUFS", delta=status_delta)
+                        else:
+                            c5.metric("Ses Seviyesi (LUFS)", "Ölçülemedi")
+
+                        if has_vpaid:
+                            st.error("🚨 **UYARI:** Bu VAST Tag içerisinde **VPAID (JavaScript)** bileşenler tespit edildi! HBO MAX vb. platformlar reddedebilir.")
+                        else:
                             st.success("✅ **TEMİZ:** VAST Tag içerisinde VPAID bulunmuyor. Yayıncılar için uygundur.")
 
                         st.subheader("📹 Bulunan Medya Dosyaları (MediaFiles)")
@@ -205,12 +233,11 @@ with tab3:
                             df_media = pd.DataFrame(media_files)
                             st.dataframe(df_media, use_container_width=True)
 
-                            video_url = next((m["URL"] for m in media_files if "mp4" in m["Type"].lower() or m["URL"].endswith(".mp4")), None)
-                            if video_url:
-                                st.subheader("▶️ Önizleme Videosu")
-                                st.video(video_url)
+                            if target_video_url:
+                                st.subheader("▶️ VAST Önizleme Videosu")
+                                st.video(target_video_url)
                         else:
-                            st.warning("⚠️ XML içerisinde doğrudan MediaFile bağlantısı bulunamadı (Wrapper veya boş yanıt olabilir).")
+                            st.warning("⚠️ XML içerisinde doğrudan MediaFile bağlantısı bulunamadı.")
 
                         st.subheader("📈 Impression Tracking URL'leri")
                         if impressions:
@@ -224,6 +251,6 @@ with tab3:
                         st.error(f"❌ VAST URL'ye erişilemedi! HTTP Durum Kodu: {response.status_code}")
 
                 except Exception as e:
-                    st.error(f"❌ VAST XML ayrıştırılırken hata oluştu: {e}")
+                    st.error(f"❌ VAST XML veya Ses ayrıştırılırken hata oluştu: {e}")
         else:
             st.warning("⚠️ Lütfen analiz etmek için geçerli bir VAST URL girin.")
