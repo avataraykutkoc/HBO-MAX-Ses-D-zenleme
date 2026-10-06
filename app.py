@@ -314,9 +314,39 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     }
 
 
-# --- SAYFA 1 ---
 if page == "📁 Otomatik Video Normalizasyonu":
     st.header("Otomatik Video Normalizasyon Araci")
     st.write("MP4 yukleyin.")
 
-    up
+    up_file = st.file_uploader("Video Yukle (.mp4)", type=["mp4"])
+
+    if up_file is not None:
+        fb = up_file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tf:
+            tf.write(fb)
+            tp = tf.name
+
+        st.subheader("1. Video Analizi")
+        st.video(fb)
+
+        with st.spinner("Analiz ediliyor..."):
+            stats = run_ffmpeg_analysis(tp)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Cozunurluk", stats["resolution"])
+        c2.metric("Sure", stats["duration"])
+
+        lufs_str = str(stats["lufs"]) + " LUFS" if stats["lufs"] is not None else "Olculemedi"
+        c3.metric("Ses", lufs_str)
+
+        border_str = "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
+        c4.metric("Siyah Kenarlik", border_str)
+
+        st.markdown("---")
+        st.subheader("2. Otomatik Normalizasyon (-24 LUFS & Boyut Kontrolu)")
+
+        out_tmp = tp.replace(".mp4", "_norm.mp4")
+        if stats["size_mb"] > 100:
+            spinner_msg = "Video 100 MB ustunde oldugu icin 98 MB altina sikistiriliyor ve ses -24 LUFS yapiliyor..."
+        else:
+            spinner_msg = "Ses seviyesi -24
