@@ -30,7 +30,6 @@ with col_author:
 
 
 def run_ffmpeg_analysis(input_path):
-    """FFmpeg ile videonun çözünürlük, süre, LUFS ve True Peak değerlerini ölçer."""
     stats = {
         "duration": "00:00:00",
         "resolution": "Bilinmiyor",
@@ -75,7 +74,6 @@ def run_ffmpeg_analysis(input_path):
 
 
 def normalize_video_ffmpeg(input_path, output_path):
-    """Videonun sesini hedef -24 LUFS standartlarına normalize eder."""
     try:
         cmd = [
             "ffmpeg",
@@ -262,169 +260,4 @@ with tab1:
         "Lütfen analiz etmek veya ses standartlaştırması (-24 LUFS) yapmak istediğiniz MP4 videosunu yükleyin."
     )
 
-    uploaded_file = st.file_uploader(
-        "Video Dosyası Yükle (.mp4)", type=["mp4"]
-    )
-
-    if uploaded_file is not None:
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=".mp4"
-        ) as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        st.subheader("1. Video Analizi")
-        with st.spinner("FFmpeg ile video inceleniyor..."):
-            stats = run_ffmpeg_analysis(tmp_path)
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Çözünürlük", stats["resolution"])
-        c2.metric("Süre", stats["duration"])
-        c3.metric(
-            "Ses (LUFS)",
-            str(stats["lufs"]) + " LUFS"
-            if stats["lufs"] is not None
-            else "Yok",
-        )
-        c4.metric(
-            "True Peak",
-            str(stats["true_peak"]) + " dB"
-            if stats["true_peak"] is not None
-            else "Yok",
-        )
-
-        st.markdown("---")
-        st.subheader("2. Otomatik Normalizasyon (-24 LUFS)")
-
-        if st.button("Normalize Et ve İndir", type="primary"):
-            out_tmp = tmp_path.replace(".mp4", "_norm.mp4")
-            with st.spinner(
-                "Ses seviyesi -24 LUFS standartlarına dönüştürülüyor..."
-            ):
-                success = normalize_video_ffmpeg(tmp_path, out_tmp)
-
-            if success and os.path.exists(out_tmp):
-                st.success(
-                    "✅ İşlem Başarılı! Video ses seviyesi -24 LUFS olarak sabitlendi."
-                )
-                with open(out_tmp, "rb") as f:
-                    st.download_button(
-                        label="⬇️ Standardize Edilmiş Videoyu İndir",
-                        data=f,
-                        file_name="normalized_" + uploaded_file.name,
-                        mime="video/mp4",
-                    )
-            else:
-                st.error("Dönüştürme esnasında bir hata oluştu.")
-
-# --- TAB 2: BIGQUERY ---
-with tab2:
-    st.header("BigQuery Paneli")
-    st.info("Merchant veri sorgulama paneli burada yer almaktadır.")
-
-# --- TAB 3: VAST ANALİZİ ---
-with tab3:
-    st.header("VAST Tag ve Medya Analizi")
-
-    input_type = st.radio(
-        "Girdi Tipi:", ["VAST URL", "VAST XML"], horizontal=True
-    )
-    vast_input = st.text_area(
-        "VAST Kodunu veya Bağlantısını Yapıştırın:", height=100
-    )
-
-    if st.button("Test Et", type="primary"):
-        if not vast_input.strip():
-            st.warning("Lütfen geçerli bir VAST URL veya XML girin.")
-        else:
-            with st.spinner("VAST Analizi Yapılıyor..."):
-                is_xml_in = input_type == "VAST XML"
-                res_data = resolve_vast_and_get_media(
-                    vast_input, is_xml=is_xml_in
-                )
-
-                if res_data["status"] == "ok" and res_data.get("medias"):
-                    st.success("✅ VAST Tag Başarıyla Analiz Edildi!")
-
-                    col1, col2, col3 = st.columns(3)
-
-                    with col1:
-                        if res_data["has_vpaid"]:
-                            st.error("⚠️ VPAID Bağımlılığı: VAR")
-                            st.caption(
-                                "Bu VAST etiketi VPAID/JS çalıştırmaktadır. CTV cihazlarında sorun çıkabilir."
-                            )
-                        else:
-                            st.success("✅ VPAID Bağımlılığı: YOK")
-                            st.caption(
-                                "Saf MP4 video. Yayıncılar ve CTV için uygundur."
-                            )
-
-                    with col2:
-                        dims = list(
-                            set([m["dimension"] for m in res_data["medias"]])
-                        )
-                        dim_str = ", ".join(dims)
-                        st.info("📐 Bulunan Boyutlar: " + dim_str)
-                        st.caption(
-                            "Toplam "
-                            + str(len(res_data["medias"]))
-                            + " adet MP4 tespit edildi."
-                        )
-
-                    with col3:
-                        sample_url = res_data["medias"][0]["url"]
-                        lufs_val = analyze_audio_lufs(sample_url)
-
-                        if lufs_val is not None:
-                            if -26.0 <= lufs_val <= -22.0:
-                                st.success(
-                                    "🔊 Ses Seviyesi: "
-                                    + str(lufs_val)
-                                    + " LUFS"
-                                )
-                                st.caption("✅ Ses seviyesi standartlara uygun.")
-                            else:
-                                st.warning(
-                                    "🔊 Ses Seviyesi: "
-                                    + str(lufs_val)
-                                    + " LUFS"
-                                )
-                                st.caption(
-                                    "Uyarı: Hedef -24 LUFS seviyesinin dışında."
-                                )
-                        else:
-                            st.warning("🔊 Ses Seviyesi: Ölçülemedi")
-                            st.caption(
-                                "Ses izi bulunamadı veya FFmpeg okuyamadı."
-                            )
-
-                    hd_video = None
-                    for m in res_data["medias"]:
-                        if m["dimension"] == "1920x1080":
-                            hd_video = m
-                            break
-
-                    if not hd_video:
-                        hd_video = res_data["medias"][0]
-
-                    st.markdown("---")
-                    st.subheader(
-                        "🎬 Reklam Videosu Önizleme ("
-                        + str(hd_video["dimension"])
-                        + ")"
-                    )
-                    st.video(hd_video["url"])
-
-                else:
-                    st.error(
-                        "⚠️ XML veya VAST yönlendirmelerinde oynatılabilir MP4 videosu bulunamadı."
-                    )
-                    if res_data.get("has_vpaid"):
-                        st.error(
-                            "❌ Bu VAST yalnızca VPAID (.js) barındırıyor, doğrudan MP4 içermiyor."
-                        )
-
-                if "xml" in res_data and res_data["xml"]:
-                    with st.expander("Ham XML Yanıtını İncele"):
-                        st.code(res_data["xml"], language="xml")
+    uploaded_file = st.file
