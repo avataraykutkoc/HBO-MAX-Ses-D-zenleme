@@ -116,5 +116,14 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     }
     last_xml = ""
     visited = set()
+    step = 0
 
-    for _ in range(max_redirects
+    while step < max_redirects:
+        step += 1
+        if curr_url in visited:
+            break
+        visited.add(curr_url)
+
+        ts = str(int(time.time()))
+        curr_url = curr_url.replace("[timestamp]", ts)
+        curr_url = curr_url.replace("ord=[timestamp]", "ord=" +
