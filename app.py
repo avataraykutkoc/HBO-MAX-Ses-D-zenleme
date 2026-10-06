@@ -16,17 +16,9 @@ st.set_page_config(
 
 col_title, col_author = st.columns([3, 1])
 with col_title:
-    st.title("🎁 HepsiAd - Otomatik Video & Ses Standartlaştırma Portalı")
+    st.title("🎁 HepsiAd - Video Portal")
 with col_author:
-    st.markdown(
-        """
-        <div style="background-color: #1E293B; padding: 10px; border-radius: 10px; border: 1px solid #3B82F6; text-align: center;">
-            <p style="margin: 0; font-size: 11px; color: #94A3B8;">HepsiAd Tech Portal</p>
-            <p style="margin: 0; font-weight: bold; color: #38BDF8;">👨‍‍💻 Creator: Aykut Koç</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("<b>Creator: Aykut Koç</b>", unsafe_allow_html=True)
 
 
 def check_black_borders(v_src):
@@ -157,7 +149,7 @@ def extract_vast_details(xml_text):
     found = []
     has_vpaid = False
     xl = xml_text.lower()
-    if ("vpaid" in xl) or ("application/x-javascript" in xl):
+    if ("vpaid" in xl) or ("javascript" in xl):
         has_vpaid = True
     try:
         xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
@@ -170,7 +162,7 @@ def extract_vast_details(xml_text):
             if ("vpaid" in mf.get("apiFramework", "").lower()) or (".js" in u):
                 has_vpaid = True
             if u and ((".mp4" in u.lower()) or ("video" in mt.lower())):
-                dim = str(w) + "x" + str(h) if w and h else "Belirtilmemiş"
+                dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
                 found.append(
                     {"url": u, "dimension": dim, "width": w, "height": h}
                 )
@@ -195,7 +187,6 @@ def extract_vast_details(xml_text):
 
 
 def find_wrapper_url(xml_text):
-    """VASTAdTagURI etiketini XML içerisinden güvenli bir şekilde söker."""
     try:
         xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
         root = ET.fromstring(xml_clean)
@@ -205,7 +196,6 @@ def find_wrapper_url(xml_text):
     except Exception:
         pass
 
-    # XML Parse olamıyorsa düz metin araması yap
     if "<VASTAdTagURI>" in xml_text:
         s = xml_text.split("<VASTAdTagURI>")[1].split("</VASTAdTagURI>")[0]
         s = s.replace("<![CDATA[", "").replace("]]>", "").strip()
@@ -226,5 +216,136 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
 
     curr_url = vast_input.strip()
     headers = {}
-    headers["User-Agent"] = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
+    headers["User-Agent"] = "Mozilla/5.0"
+
+    last_xml = ""
+    visited = set()
+    step = 0
+
+    while step < max_redirects:
+        step += 1
+        if curr_url in visited:
+            break
+        visited.add(curr_url)
+        ts = str(int(time.time()))
+
+        curr_url = curr_url.replace("[timestamp]", ts)
+        curr_url = curr_url.replace("${GDPR}", "1")
+        curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
+        curr_url = curr_url.replace("[BREAKPOSITION]", "1")
+        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
+        curr_url = curr_url.replace("[OMIDPARTNER]", "1")
+
+        try:
+            res = requests.get(curr_url, headers=headers, timeout=12)
+            if res.status_code != 200:
+                res_err = {}
+                res_err["status"] = "error"
+                res_err["message"] = "HTTP Hata " + str(res.status_code)
+                return res_err
+
+            last_xml = res.text
+            medias, has_vpaid = extract_vast_details(last_xml)
+
+            if medias:
+                res_m = {}
+                res_m["medias"] = medias
+                res_m["has_vpaid"] = has_vpaid
+                res_m["xml"] = last_xml
+                res_m["status"] = "ok"
+                return res_m
+
+            next_u = find_wrapper_url(last_xml)
+            if next_u:
+                curr_url = next_u
+                continue
+            break
+        except Exception as e:
+            res_ex = {}
+            res_ex["status"] = "error"
+            res_ex["message"] = str(e)
+            return res_ex
+
+    res_final = {}
+    res_final["status"] = "no_media"
+    res_final["xml"] = last_xml
+    res_final["message"] = "MP4 bulunamadi."
+    return res_final
+
+
+tab1, tab2, tab3 = st.tabs([
+    "📁 Otomatik Video Normalizasyonu",
+    "📊 BigQuery Paneli",
+    "🔗 VAST Tag Analizi",
+])
+
+# --- TAB 1 ---
+with tab1:
+    st.header("Otomatik Video Normalizasyon Araci")
+    st.write("MP4 yukleyin.")
+
+    up_file = st.file_uploader("Video Yukle (.mp4)", type=["mp4"])
+
+    if up_file is not None:
+        fb = up_file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tf:
+            tf.write(fb)
+            tp = tf.name
+
+        st.subheader("1. Video Analizi")
+        st.video(fb)
+
+        with st.spinner("Analiz ediliyor..."):
+            stats = run_ffmpeg_analysis(tp)
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Cozunurluk", stats["resolution"])
+        c2.metric("Sure", stats["duration"])
+        c3.metric(
+            "Ses",
+            str(stats["lufs"]) + " LUFS" if stats["lufs"] is not None else "Yok",
+        )
+        c4.metric(
+            "Peak",
+            str(stats["true_peak"]) + " dB"
+            if stats["true_peak"] is not None
+            else "Yok",
+        )
+        c5.metric(
+            "Siyah Kenarlik",
+            "VAR" if stats["has_black_borders"] else "Yok",
+        )
+
+        st.markdown("---")
+        st.subheader("2. Otomatik Normalizasyon (-24 LUFS)")
+
+        out_tmp = tp.replace(".mp4", "_norm.mp4")
+        with st.spinner("Ses seviyesi -24 LUFS yapiliyor..."):
+            ok = normalize_video_ffmpeg(tp, out_tmp)
+
+        if ok and os.path.exists(out_tmp):
+            st.success("Ses seviyesi -24 LUFS yapildi.")
+            with open(out_tmp, "rb") as f:
+                nb = f.read()
+            st.subheader("Standardize Edilmis Video (-24 LUFS)")
+            st.video(nb)
+            st.download_button(
+                label="Videoyu Indir",
+                data=nb,
+                file_name="normalized_" + up_file.name,
+                mime="video/mp4",
+            )
+        else:
+            st.error("Hata olustu.")
+
+# --- TAB 2 ---
+with tab2:
+    st.header("BigQuery Paneli")
+    st.info("Merchant paneli.")
+
+# --- TAB 3 ---
+with tab3:
+    st.header("VAST Tag Analizi")
+
+    input_type = st.radio(
+        "Girdi Tipi:", ["VAST URL", "VAST XML"], horizontal=True
