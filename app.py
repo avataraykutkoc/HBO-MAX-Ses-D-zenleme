@@ -30,8 +30,6 @@ with col_author:
 
 
 def check_black_borders(video_path_or_url):
-    """FFmpeg cropdetect ile videoda siyah kenarlık (letterbox/pillarbox)
-    olup olmadığını kontrol eder."""
     try:
         cmd = [
             "ffmpeg",
@@ -51,21 +49,17 @@ def check_black_borders(video_path_or_url):
             cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True
         )
         out = res.stderr
-
         crops = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", out)
         if crops:
-            w_crop, h_crop = int(crops[-1][0]), int(crops[-1][1])
-
-            # Orijinal Çözünürlüğü Yakala
+            w_crop = int(crops[-1][0])
+            h_crop = int(crops[-1][1])
             res_m = re.search(r"Video:.*?\s(\d{3,4})x(\d{3,4})", out)
             if res_m:
-                orig_w, orig_h = int(res_m.group(1)), int(res_m.group(2))
-
-                # Tolerans Payı (30 piksel)
+                orig_w = int(res_m.group(1))
+                orig_h = int(res_m.group(2))
                 if (orig_w - w_crop > 30) or (orig_h - h_crop > 30):
-                    return True  # Siyah Kenarlık Var!
-
-        return False  # Siyah Kenarlık Yok / Temiz
+                    return True
+        return False
     except Exception:
         return False
 
@@ -111,7 +105,6 @@ def run_ffmpeg_analysis(input_path):
             stats["true_peak"] = float(tp_m.group(1))
 
         stats["has_black_borders"] = check_black_borders(input_path)
-
     except Exception:
         pass
     return stats
@@ -198,69 +191,4 @@ def extract_vast_details(xml_text):
         regex_mp4 = re.findall(
             r"https?://[^\s\"'<>]+?\.(?:mp4)[^\s\"'<>]*", xml_text, re.IGNORECASE
         )
-        for url in regex_mp4:
-            clean_url = (
-                url.replace("<![CDATA[", "")
-                .replace("]]>", "")
-                .replace("&amp;", "&")
-            )
-            found_medias.append({
-                "url": clean_url,
-                "dimension": "Bilinmiyor",
-                "width": 0,
-                "height": 0,
-            })
-
-    return found_medias, has_vpaid
-
-
-def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
-    if is_xml:
-        medias, has_vpaid = extract_vast_details(vast_input)
-        status = "ok" if medias else "no_media"
-        return {
-            "medias": medias,
-            "has_vpaid": has_vpaid,
-            "xml": vast_input,
-            "status": status,
-        }
-
-    curr_url = vast_input.strip()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    last_xml = ""
-    visited = set()
-    step = 0
-
-    while step < max_redirects:
-        step += 1
-        if curr_url in visited:
-            break
-        visited.add(curr_url)
-
-        ts = str(int(time.time()))
-        replacements = {
-            "[timestamp]": ts,
-            "${GDPR}": "1",
-            "${GDPR_CONSENT_755}": "1",
-            "[BREAKPOSITION]": "1",
-            "[APIFRAMEWORKS]": "1,2,7",
-            "[OMIDPARTNER]": "1",
-        }
-        for old_val, new_val in replacements.items():
-            curr_url = curr_url.replace(old_val, new_val)
-
-        try:
-            res = requests.get(curr_url, headers=headers, timeout=12)
-            if res.status_code != 200:
-                return {
-                    "status": "error",
-                    "message": "HTTP " + str(res.status_code) + " Hatası",
-                }
-
-            last_xml = res.text
-            medias, has_vpaid = extract_vast_details(last_xml)
-
-            if medias:
-                return {
+        for url in
