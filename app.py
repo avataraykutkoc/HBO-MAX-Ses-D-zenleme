@@ -314,7 +314,7 @@ with tab1:
             st.video(norm_bytes)
 
             st.download_button(
-                label="⬇️ Standardize Edilmiş Videoyu İndir",
+                label="⬇️️ Standardize Edilmiş Videoyu İndir",
                 data=norm_bytes,
                 file_name="normalized_" + up_file.name,
                 mime="video/mp4",
@@ -366,5 +366,71 @@ with tab3:
                             )
 
                     with col2:
-                        dims = list(
-                            set([m["dimension"] for m in res_data
+                        dims_set = set()
+                        for item in res_data["medias"]:
+                            dims_set.add(item["dimension"])
+                        dim_str = ", ".join(list(dims_set))
+
+                        st.info("📐 Bulunan Boyutlar: " + dim_str)
+                        st.caption(
+                            "Toplam "
+                            + str(len(res_data["medias"]))
+                            + " adet MP4 tespit edildi."
+                        )
+
+                    with col3:
+                        sample_url = res_data["medias"][0]["url"]
+                        lufs_val = analyze_audio_lufs(sample_url)
+
+                        if lufs_val is not None:
+                            if -26.0 <= lufs_val <= -22.0:
+                                st.success(
+                                    "🔊 Ses Seviyesi: "
+                                    + str(lufs_val)
+                                    + " LUFS"
+                                )
+                                st.caption("✅ Ses seviyesi standartlara uygun.")
+                            else:
+                                st.warning(
+                                    "🔊 Ses Seviyesi: "
+                                    + str(lufs_val)
+                                    + " LUFS"
+                                )
+                                st.caption(
+                                    "Uyarı: Hedef -24 LUFS seviyesinin dışında."
+                                )
+                        else:
+                            st.warning("🔊 Ses Seviyesi: Ölçülemedi")
+                            st.caption(
+                                "Ses izi bulunamadı veya FFmpeg okuyamadı."
+                            )
+
+                    hd_video = None
+                    for m in res_data["medias"]:
+                        if m["dimension"] == "1920x1080":
+                            hd_video = m
+                            break
+
+                    if not hd_video:
+                        hd_video = res_data["medias"][0]
+
+                    st.markdown("---")
+                    st.subheader(
+                        "🎬 Reklam Videosu Önizleme ("
+                        + str(hd_video["dimension"])
+                        + ")"
+                    )
+                    st.video(hd_video["url"])
+
+                else:
+                    st.error(
+                        "⚠️ XML veya VAST yönlendirmelerinde oynatılabilir MP4 videosu bulunamadı."
+                    )
+                    if res_data.get("has_vpaid"):
+                        st.error(
+                            "❌ Bu VAST yalnızca VPAID (.js) barındırıyor, doğrudan MP4 içermiyor."
+                        )
+
+                if "xml" in res_data and res_data["xml"]:
+                    with st.expander("Ham XML Yanıtını İncele"):
+                        st.code(res_data["xml"], language="xml")
