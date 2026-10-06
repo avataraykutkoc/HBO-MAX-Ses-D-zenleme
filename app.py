@@ -51,10 +51,12 @@ def check_black_borders(v_src):
         out = res.stderr
         crops = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", out)
         if crops:
-            cw, ch = int(crops[-1][0]), int(crops[-1][1])
+            cw = int(crops[-1][0])
+            ch = int(crops[-1][1])
             res_m = re.search(r"Video:.*?\s(\d{3,4})x(\d{3,4})", out)
             if res_m:
-                ow, oh = int(res_m.group(1)), int(res_m.group(2))
+                ow = int(res_m.group(1))
+                oh = int(res_m.group(2))
                 if (ow - cw > 30) or (oh - ch > 30):
                     return True
         return False
@@ -226,29 +228,8 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         for k, v in reps.items():
             curr_url = curr_url.replace(k, v)
 
+        res = None
         try:
             res = requests.get(curr_url, headers=headers, timeout=12)
-            if res.status_code != 200:
-                return {
-                    "status": "error",
-                    "message": "HTTP " + str(res.status_code) + " Hatası",
-                }
-
-            last_xml = res.text
-            medias, has_vpaid = extract_vast_details(last_xml)
-
-            if medias:
-                return {
-                    "medias": medias,
-                    "has_vpaid": has_vpaid,
-                    "xml": last_xml,
-                    "status": "ok",
-                }
-
-            wm = re.search(
-                r"<VASTAdTagURI>\s*<!\[CDATA\[\s*(.*?)\s*\]\]>\s*</VASTAdTagURI>|<VASTAdTagURI>\s*(.*?)\s*</VASTAdTagURI>",
-                last_xml,
-                re.DOTALL | re.IGNORECASE,
-            )
-            if wm:
-                next_url = wm.group(1) or wm.group(2)
+        except Exception as e:
+            return {"
