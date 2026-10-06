@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -29,73 +30,95 @@ with col_author:
     )
 
 
-# VAST & Wrapper Çözümleme Fonksiyonu
+def extract_media_urls_from_xml(xml_text):
+    """XML içinden hem etiketlerden hem CDATA/Regex ile MP4 ve Medya URL'lerini
+    süzer."""
+    found_urls = []
+
+    # 1. Yöntem: Standart XML Parse (MediaFile ve VASTAdTagURI)
+    try:
+        # Namespace temizliği (Örn: xmlns="http://www.iab.net/2011/vhb")
+        xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
+        root = ET.fromstring(xml_clean)
+
+        for mf in root.findall(".//MediaFile"):
+            if mf.text and mf.text.strip():
+                found_urls.append(mf.text.strip())
+    except Exception:
+        pass
+
+    # 2. Yöntem: CDATA ve VPAID JS içi dâhil tüm MP4/WebM URL'lerini Regex ile yakala
+    regex_mp4 = re.findall(
+        r"https?://[^\s\"'<>]+?\.(?:mp4|webm|m3u8)[^\s\"'<>]*",
+        xml_text,
+        re.IGNORECASE,
+    )
+    for url in regex_mp4:
+        # Temizlik
+        clean_url = (
+            url.replace("<![CDATA[", "")
+            .replace("]]>", "")
+            .replace("&amp;", "&")
+        )
+        if clean_url not in found_urls:
+            found_urls.append(clean_url)
+
+    return found_urls
+
+
 def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
-    """VAST Tag veya XML girdisini çözer.
-
-    Wrapper (yönlendirme) varsa derinlemesine takip eder ve MediaFile'ları
-    bulur.
-    """
+    """VAST Tag veya XML girdisini çözer, yönlendirmeleri takip eder ve medya
+    URL'lerini bulur."""
     if is_xml:
-        try:
-            root = ET.fromstring(vast_input)
-            media_files = root.findall(".//MediaFile")
-            media_urls = [
-                mf.text.strip() for mf in media_files if mf and mf.text
-            ]
-            has_vpaid = any(
-                "vpaid" in (mf.get("apiFramework", "").lower())
-                or "vpaid" in (mf.text or "").lower()
-                for mf in media_files
-            )
-            return {
-                "media_files": media_urls,
-                "has_vpaid": has_vpaid,
-                "xml": vast_input,
-                "status": "ok" if media_urls else "no_media",
-            }
-        except Exception as e:
-            return {"status": "error", "message": f"XML Parse Hatası: {str(e)}"}
+        media_urls = extract_media_urls_from_xml(vast_input)
+        has_vpaid = "vpaid" in vast_input.lower()
+        return {
+            "media_files": media_urls,
+            "has_vpaid": has_vpaid,
+            "xml": vast_input,
+            "status": "ok" if media_urls else "no_media",
+        }
 
-    # URL İşleme Mantığı
     current_url = vast_input.strip()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
     last_xml = ""
+    visited_urls = set()
+
     for depth in range(max_redirects):
-        # Makro parametreleri temizle / doldur
-        current_url = current_url.replace("[timestamp]", str(int(time.time())))
-        current_url = current_url.replace(
-            "ord=[timestamp]", f"ord={int(time.time())}"
+        if current_url in visited_urls:
+            break
+        visited_urls.add(current_url)
+
+        # Makro Parametrelerini Temizle / Rakam Yap
+        timestamp_str = str(int(time.time()))
+        current_url = (
+            current_url.replace("[timestamp]", timestamp_str)
+            .replace("ord=[timestamp]", f"ord={timestamp_str}")
+            .replace("${GDPR}", "1")
+            .replace("${GDPR_CONSENT_755}", "1")
+            .replace("[BREAKPOSITION]", "1")
+            .replace("[APIFRAMEWORKS]", "1,2,7")
+            .replace("[OMIDPARTNER]", "1")
         )
-        current_url = current_url.replace("${GDPR}", "1")
-        current_url = current_url.replace("${GDPR_CONSENT_755}", "1")
-        current_url = current_url.replace("[BREAKPOSITION]", "1")
 
         try:
             res = requests.get(current_url, headers=headers, timeout=12)
             if res.status_code != 200:
                 return {
                     "status": "error",
-                    "message": f"HTTP {res.status_code} Hatası alındı.",
+                    "message": f"HTTP {res.status_code} yanıtı alındı.",
                 }
 
             last_xml = res.text
-            root = ET.fromstring(last_xml)
+            media_urls = extract_media_urls_from_xml(last_xml)
+            has_vpaid = "vpaid" in last_xml.lower()
 
-            # 1. Doğrudan MediaFile var mı?
-            media_files = root.findall(".//MediaFile")
-            if media_files:
-                media_urls = [
-                    mf.text.strip() for mf in media_files if mf and mf.text
-                ]
-                has_vpaid = any(
-                    "vpaid" in (mf.get("apiFramework", "").lower())
-                    or "vpaid" in (mf.text or "").lower()
-                    for mf in media_files
-                )
+            # Eğer medya dosyası bulunduysa başarılı dön
+            if media_urls:
                 return {
                     "media_files": media_urls,
                     "has_vpaid": has_vpaid,
@@ -103,12 +126,22 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
                     "status": "ok",
                 }
 
-            # 2. Wrapper / Yönlendirme Var mı?
-            wrapper_tag = root.find(".//VASTAdTagURI")
-            if wrapper_tag is not None and wrapper_tag.text:
-                current_url = wrapper_tag.text.strip()
-            else:
-                break
+            # Medya bulunamadıysa VAST Wrapper yönlendirmesi var mı bak
+            wrapper_match = re.search(
+                r"<VASTAdTagURI>\s*<!\[CDATA\[\s*(.*?)\s*\]\]>\s*</VASTAdTagURI>|<VASTAdTagURI>\s*(.*?)\s*</VASTAdTagURI>",
+                last_xml,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if wrapper_match:
+                next_url = wrapper_match.group(1) or wrapper_match.group(2)
+                if next_url:
+                    current_url = (
+                        next_url.strip().replace("&amp;", "&").strip()
+                    )
+                    continue
+
+            break
+
         except Exception as e:
             return {
                 "status": "error",
@@ -118,7 +151,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     return {
         "status": "no_media",
         "xml": last_xml,
-        "message": "XML veya yönlendirmeler içerisinde doğrudan MediaFile (video) bağlantısı bulunamadı.",
+        "message": "XML veya takip edilen yönlendirmeler içerisinde doğrudan medya (.mp4) bağlantısı bulunamadı.",
     }
 
 
@@ -129,19 +162,14 @@ tab1, tab2, tab3 = st.tabs([
     "🔗 VAST Tag Analizi, VPAID & LUFS Sorgusu",
 ])
 
-# TAB 1: Video Normalizasyonu
 with tab1:
     st.header("Video & Ses Normalizasyon Aracı")
-    st.info(
-        "Buraya MP4 video dosyalarınızı yükleyerek standartlaştırma işlemlerini gerçekleştirebilirsiniz."
-    )
+    st.info("MP4 video dosyalarınızı buraya yükleyebilirsiniz.")
 
-# TAB 2: BigQuery
 with tab2:
     st.header("BigQuery Paneli")
     st.write("Merchant veri analizleri bu bölümde yer alır.")
 
-# TAB 3: VAST Tag Analizi
 with tab3:
     st.header("VAST Tag ve Medya Analizi")
 
@@ -164,7 +192,10 @@ with tab3:
                     vast_input, is_xml=is_xml_input
                 )
 
-                if result["status"] == "ok":
+                if (
+                    result["status"] == "ok"
+                    and len(result.get("media_files", [])) > 0
+                ):
                     st.success(
                         f"✅ Başarılı! {len(result['media_files'])} adet Medya Dosyası (MediaFile) bulundu."
                     )
@@ -174,19 +205,21 @@ with tab3:
                             "⚠️ Dikkat: Bu VAST içerisinde VPAID bileşeni tespit edildi."
                         )
                     else:
-                        st.info("ℹ️ Temiz: VPAID tespit edilmedi.")
+                        st.info("ℹ️ Temiz: VPAID bulunmuyor.")
 
                     st.subheader("Bulunan Video Bağlantıları:")
                     for idx, url in enumerate(result["media_files"], 1):
                         st.write(f"**Video {idx}:** {url}")
                         st.video(url)
 
-                elif result["status"] == "no_media":
-                    st.error(
-                        "⚠️ XML içerisinde veya takip edilen VAST yönlendirmelerinde doğrudan MediaFile bağlantısı bulunamadı."
-                    )
                 else:
-                    st.error(f"Hata: {result.get('message')}")
+                    st.error(
+                        "⚠️ XML veya takip edilen VAST yönlendirmelerinde doğrudan MediaFile (video) bağlantısı bulunamadı."
+                    )
+                    if result.get("has_vpaid"):
+                        st.warning(
+                            "Not: VAST içerisinde VPAID/JS tespit edildi ancak doğrudan MP4 videosuna ulaşılamadı."
+                        )
 
                 if "xml" in result and result["xml"]:
                     with st.expander("Ham XML Yanıtını İncele"):
