@@ -57,12 +57,15 @@ def check_black_borders(v_src):
 def run_ffmpeg_analysis(input_path):
     stats = {
         "duration": "00:00:00",
+        "duration_sec": 0,
         "resolution": "Bilinmiyor",
         "lufs": None,
         "true_peak": None,
         "has_black_borders": False,
+        "size_mb": 0,
     }
     try:
+        stats["size_mb"] = round(os.path.getsize(input_path) / (1024 * 1024), 2)
         cmd = [
             "ffmpeg",
             "-i",
@@ -80,9 +83,13 @@ def run_ffmpeg_analysis(input_path):
         rm = re.search(r"Video:.*?\s(\d{3,4}x\d{3,4})", out)
         if rm:
             stats["resolution"] = rm.group(1)
-        dm = re.search(r"Duration:\s(\d{2}:\d{2}:\d{2})", out)
+        dm = re.search(r"Duration:\s(\d{2}):(\d{2}):(\d{2}\.\d+)", out)
         if dm:
-            stats["duration"] = dm.group(1)
+            h, m, s = float(dm.group(1)), float(dm.group(2)), float(dm.group(3))
+            stats["duration_sec"] = h * 3600 + m * 60 + s
+            stats["duration"] = (
+                f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+            )
         lm = re.search(r"I:\s+([-\d.]+)\s+LUFS", out)
         if lm:
             stats["lufs"] = float(lm.group(1))
@@ -95,23 +102,50 @@ def run_ffmpeg_analysis(input_path):
     return stats
 
 
-def normalize_video_ffmpeg(input_path, output_path):
+def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
     try:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-af",
-            "loudnorm=I=-24:LRA=11:TP=-2",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            output_path,
-        ]
+        # Eğer dosya boyutu 100 MB'tan büyükse sıkıştırarak 98 MB altına çek
+        if file_size_mb > 100 and duration_sec > 0:
+            target_size_mb = 98.0
+            target_total_bitrate = (target_size_mb * 8192) / duration_sec
+            audio_bitrate = 128
+            video_bitrate = max(int(target_total_bitrate - audio_bitrate), 500)
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-af",
+                "loudnorm=I=-24:LRA=11:TP=-2",
+                "-c:v",
+                "libx264",
+                "-b:v",
+                f"{video_bitrate}k",
+                "-c:a",
+                "aac",
+                "-b:a",
+                f"{audio_bitrate}k",
+                output_path,
+            ]
+        else:
+            # 100 MB ve altındaysa video kalitesine dokunma (-c:v copy)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-af",
+                "loudnorm=I=-24:LRA=11:TP=-2",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                output_path,
+            ]
+
         subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
         )
@@ -228,190 +262,4 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         curr_url = curr_url.replace("[timestamp]", ts)
         curr_url = curr_url.replace("${GDPR}", "1")
         curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
-        curr_url = curr_url.replace("[BREAKPOSITION]", "1")
-        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
-        curr_url = curr_url.replace("[OMIDPARTNER]", "1")
-
-        try:
-            res = requests.get(curr_url, headers=headers, timeout=12)
-            if res.status_code != 200:
-                return {
-                    "status": "error",
-                    "message": "HTTP Hata " + str(res.status_code),
-                }
-
-            last_xml = res.text
-            medias, has_vpaid = extract_vast_details(last_xml)
-
-            if medias:
-                return {
-                    "medias": medias,
-                    "has_vpaid": has_vpaid,
-                    "xml": last_xml,
-                    "status": "ok",
-                }
-
-            next_u = find_wrapper_url(last_xml)
-            if next_u:
-                curr_url = next_u
-                continue
-            break
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    return {
-        "status": "no_media",
-        "xml": last_xml,
-        "message": "MP4 bulunamadi.",
-    }
-
-
-tab_names = [
-    "📁 Otomatik Video Normalizasyonu",
-    "📊 BigQuery Paneli",
-    "🔗 VAST Tag Analizi",
-]
-tab1, tab2, tab3 = st.tabs(tab_names)
-
-# --- TAB 1 ---
-with tab1:
-    st.header("Otomatik Video Normalizasyon Araci")
-    st.write("MP4 yukleyin.")
-
-    up_file = st.file_uploader("Video Yukle (.mp4)", type=["mp4"])
-
-    if up_file is not None:
-        fb = up_file.read()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tf:
-            tf.write(fb)
-            tp = tf.name
-
-        st.subheader("1. Video Analizi")
-        st.video(fb)
-
-        with st.spinner("Analiz ediliyor..."):
-            stats = run_ffmpeg_analysis(tp)
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Cozunurluk", stats["resolution"])
-        c2.metric("Sure", stats["duration"])
-
-        lufs_str = (
-            str(stats["lufs"]) + " LUFS"
-            if stats["lufs"] is not None
-            else "Yok"
-        )
-        c3.metric("Ses", lufs_str)
-
-        peak_str = (
-            str(stats["true_peak"]) + " dB"
-            if stats["true_peak"] is not None
-            else "Yok"
-        )
-        c4.metric("Peak", peak_str)
-
-        border_str = "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
-        c5.metric("Siyah Kenarlik", border_str)
-
-        st.markdown("---")
-        st.subheader("2. Otomatik Normalizasyon (-24 LUFS)")
-
-        out_tmp = tp.replace(".mp4", "_norm.mp4")
-        with st.spinner("Ses seviyesi -24 LUFS yapiliyor..."):
-            ok = normalize_video_ffmpeg(tp, out_tmp)
-
-        if ok and os.path.exists(out_tmp):
-            st.success("Ses seviyesi -24 LUFS yapildi.")
-            with open(out_tmp, "rb") as f:
-                nb = f.read()
-            st.subheader("Standardize Edilmis Video (-24 LUFS)")
-            st.video(nb)
-            st.download_button(
-                "Videoyu Indir",
-                nb,
-                file_name="normalized_" + up_file.name,
-                mime="video/mp4",
-            )
-        else:
-            st.error("Hata olustu.")
-
-# --- TAB 2 ---
-with tab2:
-    st.header("BigQuery Paneli")
-    st.info("Merchant paneli.")
-
-# --- TAB 3 ---
-with tab3:
-    st.header("VAST Tag Analizi")
-
-    girdi_secenekleri = ["VAST URL", "VAST XML"]
-    input_type = st.radio("Girdi Tipi:", girdi_secenekleri, horizontal=True)
-    vast_input = st.text_area("VAST Kodu veya Linki:", height=100)
-
-    if st.button("Test Et", type="primary"):
-        if not vast_input.strip():
-            st.warning("Lutfen VAST girin.")
-        else:
-            with st.spinner("Analiz Yapiliyor..."):
-                is_xml_bool = input_type == "VAST XML"
-                res_data = resolve_vast_and_get_media(
-                    vast_input, is_xml=is_xml_bool
-                )
-
-                if res_data["status"] == "ok" and res_data.get("medias"):
-                    st.success("VAST Basariyla Analiz Edildi!")
-
-                    col1, col2, col3, col4 = st.columns(4)
-
-                    with col1:
-                        if res_data["has_vpaid"]:
-                            st.error("VPAID: VAR ⚠️")
-                        else:
-                            st.success("VPAID: YOK ✅")
-
-                    with col2:
-                        d_set = set()
-                        for itm in res_data["medias"]:
-                            d_set.add(itm["dimension"])
-                        d_str = ", ".join(list(d_set))
-                        st.info("Boyutlar: " + d_str)
-
-                    with col3:
-                        s_url = res_data["medias"][0]["url"]
-                        lufs_val = analyze_audio_lufs(s_url)
-
-                        if lufs_val is not None:
-                            st.info("Ses: " + str(lufs_val) + " LUFS")
-                        else:
-                            st.warning("Ses: Olculemedi")
-
-                    with col4:
-                        s_url = res_data["medias"][0]["url"]
-                        has_b = check_black_borders(s_url)
-
-                        if has_b:
-                            st.warning("Siyah Kenarlik: VAR ⚠️")
-                        else:
-                            st.success("Siyah Kenarlik: YOK ✅")
-
-                    hd_video = None
-                    for m in res_data["medias"]:
-                        if m["dimension"] == "1920x1080":
-                            hd_video = m
-                            break
-
-                    if not hd_video:
-                        hd_video = res_data["medias"][0]
-
-                    st.markdown("---")
-                    st.subheader(
-                        "Reklam Videosu (" + str(hd_video["dimension"]) + ")"
-                    )
-                    st.video(hd_video["url"])
-
-                else:
-                    st.error("MP4 bulunamadi.")
-
-                if "xml" in res_data and res_data["xml"]:
-                    with st.expander("Ham XML İncele"):
-                        st.code(res_data["xml"], language="xml")
+        curr_url
