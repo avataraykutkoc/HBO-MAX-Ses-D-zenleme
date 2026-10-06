@@ -42,10 +42,10 @@ def analyze_audio_lufs(video_url):
         res = subprocess.run(
             cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True
         )
-        output = res.stderr
-        lufs_match = re.search(r"I:\s+([-\d.]+)\s+LUFS", output)
-        if lufs_match:
-            return float(lufs_match.group(1))
+        out = res.stderr
+        m = re.search(r"I:\s+([-\d.]+)\s+LUFS", out)
+        if m:
+            return float(m.group(1))
         return None
     except Exception:
         return None
@@ -66,11 +66,11 @@ def extract_vast_details(xml_text):
             url = mf.text.strip() if mf.text else ""
             w = mf.get("width")
             h = mf.get("height")
-            media_type = mf.get("type", "")
+            m_type = mf.get("type", "")
             if "vpaid" in mf.get("apiFramework", "").lower() or ".js" in url:
                 has_vpaid = True
             if url and (
-                ".mp4" in url.lower() or "video" in media_type.lower()
+                ".mp4" in url.lower() or "video" in m_type.lower()
             ):
                 dim = str(w) + "x" + str(h) if w and h else "Belirtilmemiş"
                 found_medias.append(
@@ -125,5 +125,41 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         visited.add(curr_url)
 
         ts = str(int(time.time()))
-        curr_url = curr_url.replace("[timestamp]", ts)
-        curr_url = curr_url.replace("ord=[timestamp]", "ord=" +
+
+        # Güvenli Makro Değişimi
+        replacements = {
+            "[timestamp]": ts,
+            "${GDPR}": "1",
+            "${GDPR_CONSENT_755}": "1",
+            "[BREAKPOSITION]": "1",
+            "[APIFRAMEWORKS]": "1,2,7",
+            "[OMIDPARTNER]": "1",
+        }
+        for old_val, new_val in replacements.items():
+            curr_url = curr_url.replace(old_val, new_val)
+
+        try:
+            res = requests.get(curr_url, headers=headers, timeout=12)
+            if res.status_code != 200:
+                return {
+                    "status": "error",
+                    "message": "HTTP " + str(res.status_code) + " Hatası",
+                }
+
+            last_xml = res.text
+            medias, has_vpaid = extract_vast_details(last_xml)
+
+            if medias:
+                return {
+                    "medias": medias,
+                    "has_vpaid": has_vpaid,
+                    "xml": last_xml,
+                    "status": "ok",
+                }
+
+            w_match = re.search(
+                r"<VASTAdTagURI>\s*<!\[CDATA\[\s*(.*?)\s*\]\]>\s*</VASTAdTagURI>|<VASTAdTagURI>\s*(.*?)\s*</VASTAdTagURI>",
+                last_xml,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if w_match
