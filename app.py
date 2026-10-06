@@ -194,6 +194,25 @@ def extract_vast_details(xml_text):
     return found, has_vpaid
 
 
+def find_wrapper_url(xml_text):
+    """VASTAdTagURI etiketini XML içerisinden güvenli bir şekilde söker."""
+    try:
+        xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
+        root = ET.fromstring(xml_clean)
+        uri_tag = root.find(".//VASTAdTagURI")
+        if uri_tag is not None and uri_tag.text:
+            return uri_tag.text.strip().replace("&amp;", "&")
+    except Exception:
+        pass
+
+    # XML Parse olamıyorsa düz metin araması yap
+    if "<VASTAdTagURI>" in xml_text:
+        s = xml_text.split("<VASTAdTagURI>")[1].split("</VASTAdTagURI>")[0]
+        s = s.replace("<![CDATA[", "").replace("]]>", "").strip()
+        return s.replace("&amp;", "&")
+    return None
+
+
 def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     if is_xml:
         medias, has_vpaid = extract_vast_details(vast_input)
@@ -208,45 +227,4 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     curr_url = vast_input.strip()
     headers = {}
     headers["User-Agent"] = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    )
-
-    last_xml = ""
-    visited = set()
-    step = 0
-
-    while step < max_redirects:
-        step += 1
-        if curr_url in visited:
-            break
-        visited.add(curr_url)
-        ts = str(int(time.time()))
-
-        curr_url = curr_url.replace("[timestamp]", ts)
-        curr_url = curr_url.replace("${GDPR}", "1")
-        curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
-        curr_url = curr_url.replace("[BREAKPOSITION]", "1")
-        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
-        curr_url = curr_url.replace("[OMIDPARTNER]", "1")
-
-        try:
-            res = requests.get(curr_url, headers=headers, timeout=12)
-            if res.status_code != 200:
-                res_err = {}
-                res_err["status"] = "error"
-                res_err["message"] = "HTTP " + str(res.status_code) + " Hatası"
-                return res_err
-
-            last_xml = res.text
-            medias, has_vpaid = extract_vast_details(last_xml)
-
-            if medias:
-                res_m = {}
-                res_m["medias"] = medias
-                res_m["has_vpaid"] = has_vpaid
-                res_m["xml"] = last_xml
-                res_m["status"] = "ok"
-                return res_m
-
-            wm = re.search(
-                r"<VASTAdTagURI>\s*<!\[CDATA\[\s*(.*?)\s*\]\]>\
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
