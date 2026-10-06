@@ -88,7 +88,11 @@ def run_ffmpeg_analysis(input_path):
             h, m, s = float(dm.group(1)), float(dm.group(2)), float(dm.group(3))
             stats["duration_sec"] = h * 3600 + m * 60 + s
             stats["duration"] = (
-                f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+                str(int(h)).zfill(2)
+                + ":"
+                + str(int(m)).zfill(2)
+                + ":"
+                + str(int(s)).zfill(2)
             )
         lm = re.search(r"I:\s+([-\d.]+)\s+LUFS", out)
         if lm:
@@ -104,7 +108,6 @@ def run_ffmpeg_analysis(input_path):
 
 def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
     try:
-        # Eğer dosya boyutu 100 MB'tan büyükse sıkıştırarak 98 MB altına çek
         if file_size_mb > 100 and duration_sec > 0:
             target_size_mb = 98.0
             target_total_bitrate = (target_size_mb * 8192) / duration_sec
@@ -121,15 +124,14 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
                 "-c:v",
                 "libx264",
                 "-b:v",
-                f"{video_bitrate}k",
+                str(video_bitrate) + "k",
                 "-c:a",
                 "aac",
                 "-b:a",
-                f"{audio_bitrate}k",
+                str(audio_bitrate) + "k",
                 output_path,
             ]
         else:
-            # 100 MB ve altındaysa video kalitesine dokunma (-c:v copy)
             cmd = [
                 "ffmpeg",
                 "-y",
@@ -262,4 +264,166 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         curr_url = curr_url.replace("[timestamp]", ts)
         curr_url = curr_url.replace("${GDPR}", "1")
         curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
-        curr_url
+        curr_url = curr_url.replace("[BREAKPOSITION]", "1")
+        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
+        curr_url = curr_url.replace("[OMIDPARTNER]", "1")
+
+        try:
+            res = requests.get(curr_url, headers=headers, timeout=12)
+            if res.status_code != 200:
+                return {
+                    "status": "error",
+                    "message": "HTTP Hata " + str(res.status_code),
+                }
+
+            last_xml = res.text
+            medias, has_vpaid = extract_vast_details(last_xml)
+
+            if medias:
+                return {
+                    "medias": medias,
+                    "has_vpaid": has_vpaid,
+                    "xml": last_xml,
+                    "status": "ok",
+                }
+
+            next_u = find_wrapper_url(last_xml)
+            if next_u:
+                curr_url = next_u
+                continue
+            break
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    return {
+        "status": "no_media",
+        "xml": last_xml,
+        "message": "MP4 bulunamadi.",
+    }
+
+
+tab1, tab2, tab3 = st.tabs([
+    "📁 Otomatik Video Normalizasyonu",
+    "📊 BigQuery Paneli",
+    "🔗 VAST Tag Analizi",
+])
+
+# --- TAB 1 ---
+with tab1:
+    st.header("Otomatik Video Normalizasyon Araci")
+    st.write("MP4 yukleyin.")
+
+    up_file = st.file_uploader("Video Yukle (.mp4)", type=["mp4"])
+
+    if up_file is not None:
+        fb = up_file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tf:
+            tf.write(fb)
+            tp = tf.name
+
+        st.subheader("1. Video Analizi")
+        st.video(fb)
+
+        with st.spinner("Analiz ediliyor..."):
+            stats = run_ffmpeg_analysis(tp)
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Cozunurluk", stats["resolution"])
+        c2.metric("Sure", stats["duration"])
+
+        lufs_str = (
+            str(stats["lufs"]) + " LUFS"
+            if stats["lufs"] is not None
+            else "Yok"
+        )
+        c3.metric("Ses", lufs_str)
+
+        peak_str = (
+            str(stats["true_peak"]) + " dB"
+            if stats["true_peak"] is not None
+            else "Yok"
+        )
+        c4.metric("Peak", peak_str)
+
+        border_str = "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
+        c5.metric("Siyah Kenarlik", border_str)
+
+        st.markdown("---")
+        st.subheader("2. Otomatik Normalizasyon (-24 LUFS & Boyut Kontrolü)")
+
+        out_tmp = tp.replace(".mp4", "_norm.mp4")
+        if stats["size_mb"] > 100:
+            spinner_msg = "Video 100 MB ustunde oldugu icin 98 MB altina sikistiriliyor ve ses -24 LUFS yapiliyor..."
+        else:
+            spinner_msg = "Ses seviyesi -24 LUFS yapiliyor..."
+
+        with st.spinner(spinner_msg):
+            ok = normalize_video_ffmpeg(
+                tp, out_tmp, stats["duration_sec"], stats["size_mb"]
+            )
+
+        if ok and os.path.exists(out_tmp):
+            out_size_mb = round(os.path.getsize(out_tmp) / (1024 * 1024), 2)
+            st.success(
+                "✅ İslem Basarili! Ses seviyesi -24 LUFS yapildi. Yeni Boyut: "
+                + str(out_size_mb)
+                + " MB"
+            )
+            with open(out_tmp, "rb") as f:
+                nb = f.read()
+            st.subheader("Standardize Edilmis Video (-24 LUFS)")
+            st.video(nb)
+            st.download_button(
+                "Videoyu Indir",
+                nb,
+                file_name="normalized_" + up_file.name,
+                mime="video/mp4",
+            )
+        else:
+            st.error("Hata olustu.")
+
+# --- TAB 2 ---
+with tab2:
+    st.header("BigQuery Paneli")
+    st.info("Merchant paneli.")
+
+# --- TAB 3 ---
+with tab3:
+    st.header("VAST Tag Analizi")
+
+    input_type = st.radio(
+        "Girdi Tipi:", ["VAST URL", "VAST XML"], horizontal=True
+    )
+    vast_input = st.text_area("VAST Kodu veya Linki:", height=100)
+
+    if st.button("Test Et", type="primary"):
+        if not vast_input.strip():
+            st.warning("Lutfen VAST girin.")
+        else:
+            with st.spinner("Analiz Yapiliyor..."):
+                is_xml_bool = input_type == "VAST XML"
+                res_data = resolve_vast_and_get_media(
+                    vast_input, is_xml=is_xml_bool
+                )
+
+                if res_data["status"] == "ok" and res_data.get("medias"):
+                    st.success("VAST Basariyla Analiz Edildi!")
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        if res_data["has_vpaid"]:
+                            st.error("VPAID: VAR ⚠️")
+                        else:
+                            st.success("VPAID: YOK ✅")
+
+                    with col2:
+                        d_set = set()
+                        for itm in res_data["medias"]:
+                            d_set.add(itm["dimension"])
+                        d_str = ", ".join(list(d_set))
+                        st.info("Boyutlar: " + d_str)
+
+                    with col3:
+                        s_url = res_data["medias"][0]["url"]
+                        lufs_val = analyze_audio_lufs(s_url)
