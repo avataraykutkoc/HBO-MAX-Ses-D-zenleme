@@ -32,7 +32,7 @@ with col_author:
 
 
 def analyze_audio_lufs(video_url):
-    """FFmpeg kullanarak verilen video URL'sinin LUFS ses seviyesini ve çözünürlüğünü ölçer."""
+    """FFmpeg kullanarak verilen video URL'sinin LUFS ses seviyesini ölçer."""
     try:
         cmd = [
             "ffmpeg",
@@ -41,7 +41,7 @@ def analyze_audio_lufs(video_url):
             "-af",
             "ebur128=framelog=verbose",
             "-f",
-            "null",,
+            "null",
             "-",
         ]
         result = subprocess.run(
@@ -238,4 +238,29 @@ with tab3:
                                 "Saf MP4 video. Yayıncılar ve CTV için uygundur."
                             )
 
-                    # 2.
+                    # 2. KART: Video Çözünürlükleri
+                    with col2:
+                        dimensions = list(
+                            set([m["dimension"] for m in result["medias"]])
+                        )
+                        dim_str = ", ".join(dimensions)
+                        st.info(f"📐 Bulunan Boyutlar: **{dim_str}**")
+                        st.caption(
+                            f"Toplam {len(result['medias'])} farklı kalitede MP4 dosyası tespit edildi."
+                        )
+
+                    # 3. KART: Ses Seviyesi (LUFS)
+                    with col3:
+                        sample_video_url = result["medias"][0]["url"]
+                        lufs_val = analyze_audio_lufs(sample_video_url)
+
+                        if lufs_val is not None:
+                            if -26.0 <= lufs_val <= -22.0:
+                                st.success(f"🔊 Ses Seviyesi: **{lufs_val} LUFS**")
+                                st.caption(
+                                    "✅ Ses seviyesi TV ve Dijital standartlarına uygun."
+                                )
+                            else:
+                                st.warning(f"🔊 Ses Seviyesi: **{lufs_val} LUFS**")
+                                st.caption(
+                                    "⚠️ Uyarı: Hedef -24 LUFS seviyesinin
