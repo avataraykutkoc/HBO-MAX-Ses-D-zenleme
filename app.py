@@ -22,7 +22,7 @@ with col_author:
         """
         <div style="background-color: #1E293B; padding: 10px; border-radius: 10px; border: 1px solid #3B82F6; text-align: center;">
             <p style="margin: 0; font-size: 11px; color: #94A3B8;">HepsiAd Tech Portal</p>
-            <p style="margin: 0; font-weight: bold; color: #38BDF8;">👨‍💻 Creator: Aykut Koç</p>
+            <p style="margin: 0; font-weight: bold; color: #38BDF8;">👨‍‍💻 Creator: Aykut Koç</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -65,13 +65,13 @@ def check_black_borders(v_src):
 
 
 def run_ffmpeg_analysis(input_path):
-    stats = {
-        "duration": "00:00:00",
-        "resolution": "Bilinmiyor",
-        "lufs": None,
-        "true_peak": None,
-        "has_black_borders": False,
-    }
+    stats = {}
+    stats["duration"] = "00:00:00"
+    stats["resolution"] = "Bilinmiyor"
+    stats["lufs"] = None
+    stats["true_peak"] = None
+    stats["has_black_borders"] = False
+
     try:
         cmd = [
             "ffmpeg",
@@ -171,7 +171,9 @@ def extract_vast_details(xml_text):
                 has_vpaid = True
             if u and ((".mp4" in u.lower()) or ("video" in mt.lower())):
                 dim = str(w) + "x" + str(h) if w and h else "Belirtilmemiş"
-                found.append({"url": u, "dimension": dim, "width": w, "height": h})
+                found.append(
+                    {"url": u, "dimension": dim, "width": w, "height": h}
+                )
     except Exception:
         pass
 
@@ -196,17 +198,19 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     if is_xml:
         medias, has_vpaid = extract_vast_details(vast_input)
         s_val = "ok" if medias else "no_media"
-        return {
-            "medias": medias,
-            "has_vpaid": has_vpaid,
-            "xml": vast_input,
-            "status": s_val,
-        }
+        res_ok = {}
+        res_ok["medias"] = medias
+        res_ok["has_vpaid"] = has_vpaid
+        res_ok["xml"] = vast_input
+        res_ok["status"] = s_val
+        return res_ok
 
     curr_url = vast_input.strip()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    headers = {}
+    headers["User-Agent"] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    )
+
     last_xml = ""
     visited = set()
     step = 0
@@ -217,19 +221,32 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
             break
         visited.add(curr_url)
         ts = str(int(time.time()))
-        reps = {
-            "[timestamp]": ts,
-            "${GDPR}": "1",
-            "${GDPR_CONSENT_755}": "1",
-            "[BREAKPOSITION]": "1",
-            "[APIFRAMEWORKS]": "1,2,7",
-            "[OMIDPARTNER]": "1",
-        }
-        for k, v in reps.items():
-            curr_url = curr_url.replace(k, v)
 
-        res = None
+        curr_url = curr_url.replace("[timestamp]", ts)
+        curr_url = curr_url.replace("${GDPR}", "1")
+        curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
+        curr_url = curr_url.replace("[BREAKPOSITION]", "1")
+        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
+        curr_url = curr_url.replace("[OMIDPARTNER]", "1")
+
         try:
             res = requests.get(curr_url, headers=headers, timeout=12)
-        except Exception as e:
-            return {"
+            if res.status_code != 200:
+                res_err = {}
+                res_err["status"] = "error"
+                res_err["message"] = "HTTP " + str(res.status_code) + " Hatası"
+                return res_err
+
+            last_xml = res.text
+            medias, has_vpaid = extract_vast_details(last_xml)
+
+            if medias:
+                res_m = {}
+                res_m["medias"] = medias
+                res_m["has_vpaid"] = has_vpaid
+                res_m["xml"] = last_xml
+                res_m["status"] = "ok"
+                return res_m
+
+            wm = re.search(
+                r"<VASTAdTagURI>\s*<!\[CDATA\[\s*(.*?)\s*\]\]>\
