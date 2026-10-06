@@ -43,12 +43,10 @@ def check_black_borders(v_src):
         out = res.stderr
         crops = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", out)
         if crops:
-            cw = int(crops[-1][0])
-            ch = int(crops[-1][1])
+            cw, ch = int(crops[-1][0]), int(crops[-1][1])
             res_m = re.search(r"Video:.*?\s(\d{3,4})x(\d{3,4})", out)
             if res_m:
-                ow = int(res_m.group(1))
-                oh = int(res_m.group(2))
+                ow, oh = int(res_m.group(1)), int(res_m.group(2))
                 if (ow - cw > 30) or (oh - ch > 30):
                     return True
         return False
@@ -57,13 +55,13 @@ def check_black_borders(v_src):
 
 
 def run_ffmpeg_analysis(input_path):
-    stats = {}
-    stats["duration"] = "00:00:00"
-    stats["resolution"] = "Bilinmiyor"
-    stats["lufs"] = None
-    stats["true_peak"] = None
-    stats["has_black_borders"] = False
-
+    stats = {
+        "duration": "00:00:00",
+        "resolution": "Bilinmiyor",
+        "lufs": None,
+        "true_peak": None,
+        "has_black_borders": False,
+    }
     try:
         cmd = [
             "ffmpeg",
@@ -207,17 +205,15 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     if is_xml:
         medias, has_vpaid = extract_vast_details(vast_input)
         s_val = "ok" if medias else "no_media"
-        res_ok = {}
-        res_ok["medias"] = medias
-        res_ok["has_vpaid"] = has_vpaid
-        res_ok["xml"] = vast_input
-        res_ok["status"] = s_val
-        return res_ok
+        return {
+            "medias": medias,
+            "has_vpaid": has_vpaid,
+            "xml": vast_input,
+            "status": s_val,
+        }
 
     curr_url = vast_input.strip()
-    headers = {}
-    headers["User-Agent"] = "Mozilla/5.0"
-
+    headers = {"User-Agent": "Mozilla/5.0"}
     last_xml = ""
     visited = set()
     step = 0
@@ -239,21 +235,21 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         try:
             res = requests.get(curr_url, headers=headers, timeout=12)
             if res.status_code != 200:
-                res_err = {}
-                res_err["status"] = "error"
-                res_err["message"] = "HTTP Hata " + str(res.status_code)
-                return res_err
+                return {
+                    "status": "error",
+                    "message": "HTTP Hata " + str(res.status_code),
+                }
 
             last_xml = res.text
             medias, has_vpaid = extract_vast_details(last_xml)
 
             if medias:
-                res_m = {}
-                res_m["medias"] = medias
-                res_m["has_vpaid"] = has_vpaid
-                res_m["xml"] = last_xml
-                res_m["status"] = "ok"
-                return res_m
+                return {
+                    "medias": medias,
+                    "has_vpaid": has_vpaid,
+                    "xml": last_xml,
+                    "status": "ok",
+                }
 
             next_u = find_wrapper_url(last_xml)
             if next_u:
@@ -261,23 +257,21 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
                 continue
             break
         except Exception as e:
-            res_ex = {}
-            res_ex["status"] = "error"
-            res_ex["message"] = str(e)
-            return res_ex
+            return {"status": "error", "message": str(e)}
 
-    res_final = {}
-    res_final["status"] = "no_media"
-    res_final["xml"] = last_xml
-    res_final["message"] = "MP4 bulunamadi."
-    return res_final
+    return {
+        "status": "no_media",
+        "xml": last_xml,
+        "message": "MP4 bulunamadi.",
+    }
 
 
-tab1, tab2, tab3 = st.tabs([
+tab_names = [
     "📁 Otomatik Video Normalizasyonu",
     "📊 BigQuery Paneli",
     "🔗 VAST Tag Analizi",
-])
+]
+tab1, tab2, tab3 = st.tabs(tab_names)
 
 # --- TAB 1 ---
 with tab1:
@@ -301,20 +295,23 @@ with tab1:
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Cozunurluk", stats["resolution"])
         c2.metric("Sure", stats["duration"])
-        c3.metric(
-            "Ses",
-            str(stats["lufs"]) + " LUFS" if stats["lufs"] is not None else "Yok",
+
+        lufs_str = (
+            str(stats["lufs"]) + " LUFS"
+            if stats["lufs"] is not None
+            else "Yok"
         )
-        c4.metric(
-            "Peak",
+        c3.metric("Ses", lufs_str)
+
+        peak_str = (
             str(stats["true_peak"]) + " dB"
             if stats["true_peak"] is not None
-            else "Yok",
+            else "Yok"
         )
-        c5.metric(
-            "Siyah Kenarlik",
-            "VAR" if stats["has_black_borders"] else "Yok",
-        )
+        c4.metric("Peak", peak_str)
+
+        border_str = "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
+        c5.metric("Siyah Kenarlik", border_str)
 
         st.markdown("---")
         st.subheader("2. Otomatik Normalizasyon (-24 LUFS)")
@@ -330,8 +327,8 @@ with tab1:
             st.subheader("Standardize Edilmis Video (-24 LUFS)")
             st.video(nb)
             st.download_button(
-                label="Videoyu Indir",
-                data=nb,
+                "Videoyu Indir",
+                nb,
                 file_name="normalized_" + up_file.name,
                 mime="video/mp4",
             )
@@ -347,5 +344,74 @@ with tab2:
 with tab3:
     st.header("VAST Tag Analizi")
 
-    input_type = st.radio(
-        "Girdi Tipi:", ["VAST URL", "VAST XML"], horizontal=True
+    girdi_secenekleri = ["VAST URL", "VAST XML"]
+    input_type = st.radio("Girdi Tipi:", girdi_secenekleri, horizontal=True)
+    vast_input = st.text_area("VAST Kodu veya Linki:", height=100)
+
+    if st.button("Test Et", type="primary"):
+        if not vast_input.strip():
+            st.warning("Lutfen VAST girin.")
+        else:
+            with st.spinner("Analiz Yapiliyor..."):
+                is_xml_bool = input_type == "VAST XML"
+                res_data = resolve_vast_and_get_media(
+                    vast_input, is_xml=is_xml_bool
+                )
+
+                if res_data["status"] == "ok" and res_data.get("medias"):
+                    st.success("VAST Basariyla Analiz Edildi!")
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        if res_data["has_vpaid"]:
+                            st.error("VPAID: VAR ⚠️")
+                        else:
+                            st.success("VPAID: YOK ✅")
+
+                    with col2:
+                        d_set = set()
+                        for itm in res_data["medias"]:
+                            d_set.add(itm["dimension"])
+                        d_str = ", ".join(list(d_set))
+                        st.info("Boyutlar: " + d_str)
+
+                    with col3:
+                        s_url = res_data["medias"][0]["url"]
+                        lufs_val = analyze_audio_lufs(s_url)
+
+                        if lufs_val is not None:
+                            st.info("Ses: " + str(lufs_val) + " LUFS")
+                        else:
+                            st.warning("Ses: Olculemedi")
+
+                    with col4:
+                        s_url = res_data["medias"][0]["url"]
+                        has_b = check_black_borders(s_url)
+
+                        if has_b:
+                            st.warning("Siyah Kenarlik: VAR ⚠️")
+                        else:
+                            st.success("Siyah Kenarlik: YOK ✅")
+
+                    hd_video = None
+                    for m in res_data["medias"]:
+                        if m["dimension"] == "1920x1080":
+                            hd_video = m
+                            break
+
+                    if not hd_video:
+                        hd_video = res_data["medias"][0]
+
+                    st.markdown("---")
+                    st.subheader(
+                        "Reklam Videosu (" + str(hd_video["dimension"]) + ")"
+                    )
+                    st.video(hd_video["url"])
+
+                else:
+                    st.error("MP4 bulunamadi.")
+
+                if "xml" in res_data and res_data["xml"]:
+                    with st.expander("Ham XML İncele"):
+                        st.code(res_data["xml"], language="xml")
