@@ -27,7 +27,7 @@ with col_author:
     )
 
 page = st.radio(
-    "Mod Seçin:",
+    "Mod Secin:",
     ["📁 Otomatik Video Normalizasyonu", "📊 BigQuery Paneli", "🔗 VAST Tag Analizi"],
     horizontal=True,
 )
@@ -203,7 +203,7 @@ def extract_vast_details(xml_text):
                 has_vpaid = True
 
             if u and (".mp4" in u.lower() or "video/" in mt):
-                dim = f"{w}x{h}" if w and h else "Bilinmiyor"
+                dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
                 found.append({"url": u, "dimension": dim, "width": w, "height": h})
 
         for res_tag in root.findall(".//HTMLResource") + root.findall(".//JavaScriptResource"):
@@ -316,135 +316,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
 
 # --- SAYFA 1 ---
 if page == "📁 Otomatik Video Normalizasyonu":
-    st.header("Otomatik Video Normalizasyon Aracı")
-    st.write("MP4 yükleyin.")
+    st.header("Otomatik Video Normalizasyon Araci")
+    st.write("MP4 yukleyin.")
 
-    up_file = st.file_uploader("Video Yükle (.mp4)", type=["mp4"])
-
-    if up_file is not None:
-        fb = up_file.read()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tf:
-            tf.write(fb)
-            tp = tf.name
-
-        st.subheader("1. Video Analizi")
-        st.video(fb)
-
-        with st.spinner("Analiz ediliyor..."):
-            stats = run_ffmpeg_analysis(tp)
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Çözünürlük", stats["resolution"])
-        c2.metric("Süre", stats["duration"])
-
-        lufs_str = (
-            f"{stats['lufs']} LUFS" if stats["lufs"] is not None else "Ölçülemedi"
-        )
-        c3.metric("Ses", lufs_str)
-
-        border_str = "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
-        c4.metric("Siyah Kenarlık", border_str)
-
-        st.markdown("---")
-        st.subheader("2. Otomatik Normalizasyon (-24 LUFS & Boyut Kontrolü)")
-
-        out_tmp = tp.replace(".mp4", "_norm.mp4")
-        if stats["size_mb"] > 100:
-            spinner_msg = "Video 100 MB üstünde olduğu için 98 MB altına sıkıştırılıyor ve ses -24 LUFS yapılıyor..."
-        else:
-            spinner_msg = "Ses seviyesi -24 LUFS yapılıyor..."
-
-        with st.spinner(spinner_msg):
-            ok = normalize_video_ffmpeg(
-                tp, out_tmp, stats["duration_sec"], stats["size_mb"]
-            )
-
-        if ok and os.path.exists(out_tmp):
-            out_size_mb = round(os.path.getsize(out_tmp) / (1024 * 1024), 2)
-            st.success(
-                f"✅ İşlem Başarılı! Ses seviyesi -24 LUFS yapıldı. Yeni Boyut: {out_size_mb} MB"
-            )
-            with open(out_tmp, "rb") as f:
-                nb = f.read()
-            st.subheader("Standardize Edilmiş Video (-24 LUFS)")
-            st.video(nb)
-            st.download_button(
-                "Videoyu İndir",
-                nb,
-                file_name="normalized_" + up_file.name,
-                mime="video/mp4",
-            )
-        else:
-            st.error("Hata oluştu.")
-
-# --- SAYFA 2 ---
-elif page == "📊 BigQuery Paneli":
-    st.header("BigQuery Paneli")
-    st.info("Merchant paneli.")
-
-# --- SAYFA 3 ---
-elif page == "🔗 VAST Tag Analizi":
-    st.header("VAST Tag Analizi")
-
-    input_type = st.radio(
-        "Girdi Tipi:", ["VAST URL", "VAST XML"], horizontal=True
-    )
-    vast_input = st.text_area("VAST Kodu veya Linki:", height=100)
-
-    if st.button("Test Et", type="primary"):
-        if not vast_input.strip():
-            st.warning("Lütfen VAST girin.")
-        else:
-            with st.spinner("VAST Çözülüyor ve Video Analiz Ediliyor..."):
-                is_xml_bool = input_type == "VAST XML"
-                res_data = resolve_vast_and_get_media(
-                    vast_input, is_xml=is_xml_bool
-                )
-
-                if res_data["status"] == "ok" and res_data.get("medias"):
-                    st.success("✅ VAST Tag Başarıyla Analiz Edildi!")
-
-                    hd_video = None
-                    for m in res_data["medias"]:
-                        if m["dimension"] == "1920x1080":
-                            hd_video = m
-                            break
-                    if not hd_video:
-                        hd_video = res_data["medias"][0]
-
-                    video_url = hd_video["url"]
-                    stats = run_ffmpeg_analysis(video_url)
-
-                    col_left, col_right = st.columns([2, 1])
-
-                    with col_left:
-                        st.subheader("CTV Uygunluk")
-                        c_ctv1, c_ctv2 = st.columns(2)
-                        with c_ctv1:
-                            st.success("Oynatılabilir MP4: VAR ✅")
-                        with c_ctv2:
-                            if res_data.get("has_vpaid"):
-                                st.warning("VPAID Bağımlılığı: VAR ⚠️")
-                            else:
-                                st.success("VPAID Bağımlılığı: YOK ✅")
-
-                        st.subheader("Ölçülen Video & Ses")
-                        c1, c2, c3, c4 = st.columns(4)
-
-                        res_disp = (
-                            stats["resolution"]
-                            if stats["resolution"] != "Bilinmiyor"
-                            else hd_video["dimension"]
-                        )
-                        c1.metric("Çözünürlük", res_disp)
-                        c2.metric("Süre", stats["duration"])
-
-                        border_disp = (
-                            "VAR ⚠️" if stats["has_black_borders"] else "Yok ✅"
-                        )
-                        c3.metric("Letterbox", border_disp)
-
-                        lufs_disp = (
-                            f"{stats['lufs']} LUFS"
-                            if stats["lufs"] is not None
-                            else "Ölç
+    up
