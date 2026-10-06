@@ -18,7 +18,15 @@ col_title, col_author = st.columns([3, 1])
 with col_title:
     st.title("🎁 HepsiAd - Video Portal")
 with col_author:
-    st.markdown("<b>Creator: Aykut Koç</b>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align: right; float: right;">
+            <span style="font-size: 11px; color: #94A3B8;">Creator</span>
+            <span style="font-size: 12px; font-weight: 600; color: #38BDF8; margin-left: 5px;">👨‍💻 Aykut Koç</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def check_black_borders(v_src):
@@ -54,7 +62,7 @@ def check_black_borders(v_src):
         return False
 
 
-def run_ffmpeg_analysis(input_path):
+def run_ffmpeg_analysis(input_path_or_url):
     stats = {
         "duration": "00:00:00",
         "duration_sec": 0,
@@ -65,11 +73,15 @@ def run_ffmpeg_analysis(input_path):
         "size_mb": 0,
     }
     try:
-        stats["size_mb"] = round(os.path.getsize(input_path) / (1024 * 1024), 2)
+        if os.path.exists(input_path_or_url):
+            stats["size_mb"] = round(
+                os.path.getsize(input_path_or_url) / (1024 * 1024), 2
+            )
+
         cmd = [
             "ffmpeg",
             "-i",
-            input_path,
+            input_path_or_url,
             "-af",
             "ebur128=framelog=verbose",
             "-f",
@@ -100,7 +112,7 @@ def run_ffmpeg_analysis(input_path):
         tm = re.search(r"Peak:\s+([-\d.]+)\s+dBFS", out)
         if tm:
             stats["true_peak"] = float(tm.group(1))
-        stats["has_black_borders"] = check_black_borders(input_path)
+        stats["has_black_borders"] = check_black_borders(input_path_or_url)
     except Exception:
         pass
     return stats
@@ -154,29 +166,6 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
         return True
     except Exception:
         return False
-
-
-def analyze_audio_lufs(video_url):
-    try:
-        cmd = [
-            "ffmpeg",
-            "-i",
-            video_url,
-            "-af",
-            "ebur128=framelog=verbose",
-            "-f",
-            "null",
-            "-",
-        ]
-        res = subprocess.run(
-            cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-        )
-        m = re.search(r"I:\s+([-\d.]+)\s+LUFS", res.stderr)
-        if m:
-            return float(m.group(1))
-        return None
-    except Exception:
-        return None
 
 
 def extract_vast_details(xml_text):
@@ -263,6 +252,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
 
         curr_url = curr_url.replace("[timestamp]", ts)
         curr_url = curr_url.replace("${GDPR}", "1")
+        curr_url = curr_url.replace("${GDPR_CONSENT_50}", "1")
         curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
         curr_url = curr_url.replace("[BREAKPOSITION]", "1")
         curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
@@ -400,30 +390,41 @@ with tab3:
         if not vast_input.strip():
             st.warning("Lutfen VAST girin.")
         else:
-            with st.spinner("Analiz Yapiliyor..."):
+            with st.spinner("VAST Cozuluyor ve Video Analiz Ediliyor..."):
                 is_xml_bool = input_type == "VAST XML"
                 res_data = resolve_vast_and_get_media(
                     vast_input, is_xml=is_xml_bool
                 )
 
                 if res_data["status"] == "ok" and res_data.get("medias"):
-                    st.success("VAST Basariyla Analiz Edildi!")
+                    st.success("✅ VAST Tag Basariyla Analiz Edildi!")
 
-                    col1, col2, col3, col4 = st.columns(4)
+                    # Video Seçimi
+                    hd_video = None
+                    for m in res_data["medias"]:
+                        if m["dimension"] == "1920x1080":
+                            hd_video = m
+                            break
+                    if not hd_video:
+                        hd_video = res_data["medias"][0]
 
-                    with col1:
-                        if res_data["has_vpaid"]:
-                            st.error("VPAID: VAR ⚠️")
-                        else:
-                            st.success("VPAID: YOK ✅")
+                    video_url = hd_video["url"]
 
-                    with col2:
-                        d_set = set()
-                        for itm in res_data["medias"]:
-                            d_set.add(itm["dimension"])
-                        d_str = ", ".join(list(d_set))
-                        st.info("Boyutlar: " + d_str)
+                    # FFmpeg Analizi
+                    stats = run_ffmpeg_analysis(video_url)
 
-                    with col3:
-                        s_url = res_data["medias"][0]["url"]
-                        lufs_val = analyze_audio_lufs(s_url)
+                    col_left, col_right = st.columns([2, 1])
+
+                    with col_left:
+                        st.subheader("CTV Uygunluk")
+                        c_ctv1, c_ctv2 = st.columns(2)
+                        with c_ctv1:
+                            st.success("Oynatilabilir MP4: VAR ✅")
+                        with c_ctv2:
+                            if res_data["has_vpaid"]:
+                                st.warning("VPAID Bagimliligi: VAR ⚠️")
+                            else:
+                                st.success("VPAID Bagimliligi: YOK ✅")
+
+                        st.subheader("Ölçülen Video & Ses")
+                        c1, c2, c3
