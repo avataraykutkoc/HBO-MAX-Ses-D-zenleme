@@ -248,4 +248,9 @@ with tab3:
                     )
                     if res_data.get("has_vpaid"):
                         st.error(
-                            "❌ Bu VAST yalnızca VPAID (.js) barındırıyor
+                            "❌ Bu VAST yalnızca VPAID (.js) barındırıyor, doğrudan MP4 içermiyor."
+                        )
+
+                if "xml" in res_data and res_data["xml"]:
+                    with st.expander("Ham XML Yanıtını İncele"):
+                        st.code(res_data["xml"], language="xml")
