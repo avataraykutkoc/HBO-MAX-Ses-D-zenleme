@@ -72,7 +72,7 @@ def extract_vast_details(xml_text):
             if url and (
                 ".mp4" in url.lower() or "video" in media_type.lower()
             ):
-                dim = f"{w}x{h}" if w and h else "Belirtilmemiş"
+                dim = str(w) + "x" + str(h) if w and h else "Belirtilmemiş"
                 found_medias.append(
                     {"url": url, "dimension": dim, "width": w, "height": h}
                 )
@@ -117,11 +117,4 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     last_xml = ""
     visited = set()
 
-    for _ in range(max_redirects):
-        if curr_url in visited:
-            break
-        visited.add(curr_url)
-
-        ts = str(int(time.time()))
-        curr_url = curr_url.replace("[timestamp]", ts)
-        curr_url = curr_url.replace("ord=[timestamp]", f"ord={
+    for _ in range(max_redirects
