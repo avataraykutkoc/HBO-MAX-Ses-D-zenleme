@@ -296,32 +296,31 @@ with tab1:
         st.markdown("---")
         st.subheader("2. Otomatik Normalizasyon (-24 LUFS)")
 
-        if st.button("Normalize Et ve İndir", type="primary"):
-            out_tmp = tmp_path.replace(".mp4", "_norm.mp4")
-            with st.spinner(
-                "Ses seviyesi -24 LUFS standartlarına dönüştürülüyor..."
-            ):
-                success = normalize_video_ffmpeg(tmp_path, out_tmp)
+        out_tmp = tmp_path.replace(".mp4", "_norm.mp4")
+        with st.spinner(
+            "Video yüklendi, ses seviyesi otomatik olarak -24 LUFS standartlarına dönüştürülüyor..."
+        ):
+            success = normalize_video_ffmpeg(tmp_path, out_tmp)
 
-            if success and os.path.exists(out_tmp):
-                st.success(
-                    "✅ İşlem Başarılı! Video ses seviyesi -24 LUFS olarak sabitlendi."
-                )
+        if success and os.path.exists(out_tmp):
+            st.success(
+                "✅ İşlem Başarılı! Video ses seviyesi otomatik olarak -24 LUFS olarak sabitlendi."
+            )
 
-                with open(out_tmp, "rb") as f:
-                    norm_bytes = f.read()
+            with open(out_tmp, "rb") as f:
+                norm_bytes = f.read()
 
-                st.subheader("🎬 Standardize Edilmiş Video Önizleme (-24 LUFS)")
-                st.video(norm_bytes)
+            st.subheader("🎬 Standardize Edilmiş Video Önizleme (-24 LUFS)")
+            st.video(norm_bytes)
 
-                st.download_button(
-                    label="⬇️ Standardize Edilmiş Videoyu İndir",
-                    data=norm_bytes,
-                    file_name="normalized_" + up_file.name,
-                    mime="video/mp4",
-                )
-            else:
-                st.error("Dönüştürme esnasında bir hata oluştu.")
+            st.download_button(
+                label="⬇️ Standardize Edilmiş Videoyu İndir",
+                data=norm_bytes,
+                file_name="normalized_" + up_file.name,
+                mime="video/mp4",
+            )
+        else:
+            st.error("Otomatik dönüştürme esnasında bir hata oluştu.")
 
 # --- TAB 2: BIGQUERY ---
 with tab2:
@@ -368,69 +367,4 @@ with tab3:
 
                     with col2:
                         dims = list(
-                            set([m["dimension"] for m in res_data["medias"]])
-                        )
-                        dim_str = ", ".join(dims)
-                        st.info("📐 Bulunan Boyutlar: " + dim_str)
-                        st.caption(
-                            "Toplam "
-                            + str(len(res_data["medias"]))
-                            + " adet MP4 tespit edildi."
-                        )
-
-                    with col3:
-                        sample_url = res_data["medias"][0]["url"]
-                        lufs_val = analyze_audio_lufs(sample_url)
-
-                        if lufs_val is not None:
-                            if -26.0 <= lufs_val <= -22.0:
-                                st.success(
-                                    "🔊 Ses Seviyesi: "
-                                    + str(lufs_val)
-                                    + " LUFS"
-                                )
-                                st.caption("✅ Ses seviyesi standartlara uygun.")
-                            else:
-                                st.warning(
-                                    "🔊 Ses Seviyesi: "
-                                    + str(lufs_val)
-                                    + " LUFS"
-                                )
-                                st.caption(
-                                    "Uyarı: Hedef -24 LUFS seviyesinin dışında."
-                                )
-                        else:
-                            st.warning("🔊 Ses Seviyesi: Ölçülemedi")
-                            st.caption(
-                                "Ses izi bulunamadı veya FFmpeg okuyamadı."
-                            )
-
-                    hd_video = None
-                    for m in res_data["medias"]:
-                        if m["dimension"] == "1920x1080":
-                            hd_video = m
-                            break
-
-                    if not hd_video:
-                        hd_video = res_data["medias"][0]
-
-                    st.markdown("---")
-                    st.subheader(
-                        "🎬 Reklam Videosu Önizleme ("
-                        + str(hd_video["dimension"])
-                        + ")"
-                    )
-                    st.video(hd_video["url"])
-
-                else:
-                    st.error(
-                        "⚠️ XML veya VAST yönlendirmelerinde oynatılabilir MP4 videosu bulunamadı."
-                    )
-                    if res_data.get("has_vpaid"):
-                        st.error(
-                            "❌ Bu VAST yalnızca VPAID (.js) barındırıyor, doğrudan MP4 içermiyor."
-                        )
-
-                if "xml" in res_data and res_data["xml"]:
-                    with st.expander("Ham XML Yanıtını İncele"):
-                        st.code(res_data["xml"], language="xml")
+                            set([m["dimension"] for m in res_data
