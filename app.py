@@ -184,6 +184,36 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
         return False
 
 
+LUFS_MIN, LUFS_MAX = -27.0, -19.0
+
+
+def fix_vast_video_audio(video_url, duration_sec):
+    """VAST'taki MP4'u indirir, sesi -24 LUFS'a getirir, yeni dosyayi ve olcumunu dondurur."""
+    try:
+        r = requests.get(video_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+        r.raise_for_status()
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "vast_src.mp4")
+            out = os.path.join(td, "vast_norm.mp4")
+            with open(src, "wb") as f:
+                f.write(r.content)
+            size_mb = round(os.path.getsize(src) / (1024 * 1024), 2)
+            ok = normalize_video_ffmpeg(src, out, duration_sec, size_mb)
+            if not ok or not os.path.exists(out):
+                return {"ok": False, "message": "ffmpeg normalizasyonu basarisiz."}
+            new_lufs = get_fast_lufs(out)
+            with open(out, "rb") as f:
+                data = f.read()
+        return {
+            "ok": True,
+            "data": data,
+            "lufs": new_lufs,
+            "size_mb": round(len(data) / (1024 * 1024), 2),
+        }
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 def extract_vast_details(xml_text):
     found = []
     has_vpaid = False
@@ -389,6 +419,8 @@ elif page == "🔗 VAST Tag Analizi":
     vast_input = st.text_area("VAST Kodu veya Linki:", height=100)
 
     if st.button("Test Et", type="primary"):
+        st.session_state.pop("vast_result", None)
+        st.session_state.pop("vast_fixed", None)
         if not vast_input.strip():
             st.warning("Lutfen VAST girin.")
         else:
@@ -397,10 +429,9 @@ elif page == "🔗 VAST Tag Analizi":
                 res_data = resolve_vast_and_get_media(
                     vast_input, is_xml=is_xml_bool
                 )
+                result = {"input": vast_input, "res_data": res_data}
 
                 if res_data["status"] == "ok" and res_data.get("medias"):
-                    st.success("✅ VAST Tag Basariyla Analiz Edildi!")
-
                     hd_video = None
                     for m in res_data["medias"]:
                         if m["dimension"] == "1920x1080":
@@ -408,49 +439,111 @@ elif page == "🔗 VAST Tag Analizi":
                             break
                     if not hd_video:
                         hd_video = res_data["medias"][0]
+                    result["hd_video"] = hd_video
+                    result["stats"] = run_ffmpeg_analysis(hd_video["url"])
 
-                    video_url = hd_video["url"]
-                    stats = run_ffmpeg_analysis(video_url)
+                st.session_state["vast_result"] = result
 
-                    col_left, col_right = st.columns([2, 1])
+    # Sonuclar session_state'te tutuluyor; boylece "Sesi duzelt" butonuna
+    # basildiginda analiz ekrani kaybolmuyor.
+    result = st.session_state.get("vast_result")
+    if result and result["input"] == vast_input:
+        res_data = result["res_data"]
 
-                    with col_left:
-                        st.subheader("CTV Uygunluk")
-                        c_ctv1, c_ctv2 = st.columns(2)
-                        with c_ctv1:
-                            st.success("Oynatillabilir MP4: VAR ✅")
-                        with c_ctv2:
-                            if res_data.get("has_vpaid"):
-                                st.warning("VPAID Bagimliligi: VAR ⚠️")
-                            else:
-                                st.success("VPAID Bagimliligi: YOK ✅")
+        if result.get("hd_video"):
+            st.success("✅ VAST Tag Basariyla Analiz Edildi!")
+            hd_video = result["hd_video"]
+            stats = result["stats"]
+            video_url = hd_video["url"]
 
-                        st.subheader("Olculen Video & Ses")
-                        c1, c2, c3, c4 = st.columns(4)
+            col_left, col_right = st.columns([2, 1])
 
-                        res_disp = hd_video["dimension"]
-                        if stats["resolution"] != "Bilinmiyor":
-                            res_disp = stats["resolution"]
-                        c1.metric("Cozunurluk", res_disp)
-                        c2.metric("Sure", stats["duration"])
+            with col_left:
+                st.subheader("CTV Uygunluk")
+                c_ctv1, c_ctv2 = st.columns(2)
+                with c_ctv1:
+                    st.success("Oynatillabilir MP4: VAR ✅")
+                with c_ctv2:
+                    if res_data.get("has_vpaid"):
+                        st.warning("VPAID Bagimliligi: VAR ⚠️")
+                    else:
+                        st.success("VPAID Bagimliligi: YOK ✅")
 
-                        border_disp = "Yok ✅"
-                        if stats["has_black_borders"]:
-                            border_disp = "VAR ⚠️"
-                        c3.metric("Letterbox", border_disp)
+                st.subheader("Olculen Video & Ses")
+                c1, c2, c3, c4 = st.columns(4)
 
-                        lufs_disp = "Olculemedi"
-                        if stats["lufs"] is not None:
-                            lufs_disp = str(stats["lufs"]) + " LUFS"
-                        c4.metric("Ses", lufs_disp)
+                res_disp = hd_video["dimension"]
+                if stats["resolution"] != "Bilinmiyor":
+                    res_disp = stats["resolution"]
+                c1.metric("Cozunurluk", res_disp)
+                c2.metric("Sure", stats["duration"])
 
-                    with col_right:
-                        st.subheader("Reklam Videosu")
-                        st.video(video_url)
+                border_disp = "Yok ✅"
+                if stats["has_black_borders"]:
+                    border_disp = "VAR ⚠️"
+                c3.metric("Letterbox", border_disp)
 
+                lufs_disp = "Olculemedi"
+                if stats["lufs"] is not None:
+                    lufs_disp = str(stats["lufs"]) + " LUFS"
+                c4.metric("Ses", lufs_disp)
+
+                # --- Ses Duzeltme ---
+                st.subheader("Ses Duzeltme (-24 LUFS)")
+                lufs = stats["lufs"]
+                in_range = lufs is not None and LUFS_MIN <= lufs <= LUFS_MAX
+                if lufs is None:
+                    st.info("Ses olculemedi; yine de -24 LUFS'a normalize edebilirsiniz.")
+                elif in_range:
+                    st.success(
+                        "Ses seviyesi uygun (" + str(lufs) + " LUFS, kabul araligi "
+                        + str(int(LUFS_MIN)) + " / " + str(int(LUFS_MAX)) + ")."
+                    )
                 else:
-                    st.error("MP4 bulunamadi.")
+                    st.error(
+                        "Ses seviyesi uygun degil: " + str(lufs) + " LUFS (kabul araligi "
+                        + str(int(LUFS_MIN)) + " / " + str(int(LUFS_MAX)) + ")."
+                    )
 
-                if "xml" in res_data and res_data.get("xml"):
-                    with st.expander("Ham XML Incele"):
-                        st.code(res_data["xml"], language="xml")
+                if st.button(
+                    "🔧 Sesi -24 LUFS'a duzelt",
+                    type="secondary" if in_range else "primary",
+                ):
+                    with st.spinner("Video indiriliyor ve ses -24 LUFS yapiliyor..."):
+                        st.session_state["vast_fixed"] = fix_vast_video_audio(
+                            video_url, stats["duration_sec"]
+                        )
+
+                fixed = st.session_state.get("vast_fixed")
+                if fixed:
+                    if fixed["ok"]:
+                        new_lufs = "Olculemedi"
+                        if fixed["lufs"] is not None:
+                            new_lufs = str(fixed["lufs"]) + " LUFS"
+                        st.success(
+                            "✅ Ses duzeltildi! Yeni seviye: " + new_lufs
+                            + " | Boyut: " + str(fixed["size_mb"]) + " MB"
+                        )
+                        st.download_button(
+                            "⬇️ Duzeltilmis Videoyu Indir (-24 LUFS)",
+                            fixed["data"],
+                            file_name="vast_video_" + res_disp + "_-24LUFS.mp4",
+                            mime="video/mp4",
+                        )
+                    else:
+                        st.error("Duzeltme basarisiz: " + fixed.get("message", ""))
+
+            with col_right:
+                st.subheader("Reklam Videosu")
+                st.video(video_url)
+                fixed = st.session_state.get("vast_fixed")
+                if fixed and fixed.get("ok"):
+                    st.caption("Duzeltilmis versiyon (-24 LUFS)")
+                    st.video(fixed["data"])
+
+        else:
+            st.error("MP4 bulunamadi.")
+
+        if "xml" in res_data and res_data.get("xml"):
+            with st.expander("Ham XML Incele"):
+                st.code(res_data["xml"], language="xml")
