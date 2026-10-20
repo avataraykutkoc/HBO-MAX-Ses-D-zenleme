@@ -214,9 +214,34 @@ def fix_vast_video_audio(video_url, duration_sec):
         return {"ok": False, "message": str(e)}
 
 
+def _media_entry(u, w, h):
+    dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
+    return {"url": u, "dimension": dim, "width": w, "height": h}
+
+
+def _is_vpaid(mt, api_fw, u):
+    return "vpaid" in api_fw or "javascript" in mt or u.lower().endswith(".js")
+
+
+def _is_playable(mt, api_fw, u):
+    # CTV'de oynatilabilir = gercek bir MediaFile, video/* tipinde, VPAID degil.
+    # Mezzanine ya da VPAID'in AdParameters'i icindeki MP4 linkleri SAYILMAZ.
+    if not u or _is_vpaid(mt, api_fw, u):
+        return False
+    if mt:
+        return mt.startswith("video/")
+    return ".mp4" in u.lower()
+
+
 def extract_vast_details(xml_text):
     found = []
     has_vpaid = False
+
+    # XML parse edilemese bile VPAID'i kacirmamak icin ham metinde de ara
+    if re.search(r'apiFramework\s*=\s*["\']?\s*vpaid', xml_text, re.IGNORECASE) or re.search(
+        r'<MediaFile[^>]*type\s*=\s*["\']application/(?:x-)?javascript', xml_text, re.IGNORECASE
+    ):
+        has_vpaid = True
 
     try:
         xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
@@ -224,36 +249,35 @@ def extract_vast_details(xml_text):
 
         for mf in root.findall(".//MediaFile"):
             u = mf.text.strip() if mf.text else ""
-            w = mf.get("width")
-            h = mf.get("height")
             mt = mf.get("type", "").lower()
             api_fw = mf.get("apiFramework", "").lower()
 
-            if "vpaid" in api_fw or "javascript" in mt or u.lower().endswith(".js"):
+            if _is_vpaid(mt, api_fw, u):
                 has_vpaid = True
-
-            if u and (".mp4" in u.lower() or "video/" in mt):
-                dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
-                found.append({"url": u, "dimension": dim, "width": w, "height": h})
+            elif _is_playable(mt, api_fw, u):
+                found.append(_media_entry(u, mf.get("width"), mf.get("height")))
 
         for res_tag in root.findall(".//HTMLResource") + root.findall(".//JavaScriptResource"):
             if res_tag.text and "vpaid" in res_tag.text.lower():
                 has_vpaid = True
 
-    except Exception:
-        pass
+    except ET.ParseError:
+        # XML bozuksa yalnizca <MediaFile> etiketlerine regex ile bak.
+        # Eskiden burada XML'deki HER .mp4 linki "oynatilabilir" sayiliyordu;
+        # Mezzanine ve VPAID icindeki linkler yuzunden yanlis "MP4 VAR" cikiyordu.
+        for m in re.finditer(r"<MediaFile\b([^>]*)>(.*?)</MediaFile>", xml_text, re.IGNORECASE | re.DOTALL):
+            attrs, body = m.group(1), m.group(2)
 
-    if not found:
-        mp4_list = re.findall(
-            r"https?://[^\s\"'<>]+?\.(?:mp4)[^\s\"'<>]*", xml_text, re.IGNORECASE
-        )
-        for target_url in mp4_list:
-            clean_u = (
-                target_url.replace("<![CDATA[", "")
-                .replace("]]>", "")
-                .replace("&amp;", "&")
-            )
-            found.append({"url": clean_u, "dimension": "Bilinmiyor", "width": 0, "height": 0})
+            def attr(name):
+                a = re.search(name + r'\s*=\s*["\']([^"\']*)', attrs, re.IGNORECASE)
+                return a.group(1) if a else ""
+
+            u = body.replace("<![CDATA[", "").replace("]]>", "").replace("&amp;", "&").strip()
+            mt, api_fw = attr("type").lower(), attr("apiFramework").lower()
+            if _is_vpaid(mt, api_fw, u):
+                has_vpaid = True
+            elif _is_playable(mt, api_fw, u):
+                found.append(_media_entry(u, attr("width") or None, attr("height") or None))
 
     return found, has_vpaid
 
@@ -294,6 +318,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     last_xml = ""
     visited = set()
     step = 0
+    last_has_vpaid = False
 
     while step < max_redirects:
         step += 1
@@ -307,7 +332,9 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         curr_url = curr_url.replace("${GDPR_CONSENT_50}", "1")
         curr_url = curr_url.replace("${GDPR_CONSENT_755}", "1")
         curr_url = curr_url.replace("[BREAKPOSITION]", "1")
-        curr_url = curr_url.replace("[APIFRAMEWORKS]", "1,2,7")
+        # CTV (FreeWheel) VPAID desteklemez; yalnizca OMID (7) bildiriyoruz.
+        # "1,2,7" yazinca reklam sunucusu VPAID dondurmeye tesvik ediliyordu.
+        curr_url = curr_url.replace("[APIFRAMEWORKS]", "7")
         curr_url = curr_url.replace("[OMIDPARTNER]", "1")
 
         try:
@@ -320,6 +347,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
 
             last_xml = res.text
             medias, has_vpaid = extract_vast_details(last_xml)
+            last_has_vpaid = last_has_vpaid or has_vpaid
 
             if medias:
                 return {
@@ -339,6 +367,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
 
     return {
         "status": "no_media",
+        "has_vpaid": last_has_vpaid,
         "xml": last_xml,
         "message": "MP4 bulunamadi.",
     }
@@ -542,7 +571,19 @@ elif page == "🔗 VAST Tag Analizi":
                     st.video(fixed["data"])
 
         else:
-            st.error("MP4 bulunamadi.")
+            st.subheader("CTV Uygunluk")
+            st.error("Oynatilabilir MP4: YOK ❌")
+            if res_data.get("has_vpaid"):
+                st.error("VPAID Bagimliligi: VAR ⚠️ Tag sadece VPAID donduruyor, CTV'de oynamaz.")
+            xml_txt = res_data.get("xml") or ""
+            if "<Mezzanine" in xml_txt:
+                st.warning(
+                    "Tag'de yalnizca Mezzanine (orijinal yukleme) dosyasi var. "
+                    "Reklam sunucusu yayin MP4'lerini henuz uretmemis olabilir (transcode). "
+                    "Birkac saat sonra tekrar test edin; duzelmezse ajansa bildirin."
+                )
+            if res_data.get("status") == "error":
+                st.caption(res_data.get("message", ""))
 
         if "xml" in res_data and res_data.get("xml"):
             with st.expander("Ham XML Incele"):
