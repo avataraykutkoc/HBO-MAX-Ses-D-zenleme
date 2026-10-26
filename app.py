@@ -34,7 +34,6 @@ page = st.radio(
 
 st.markdown("---")
 
-
 def check_black_borders(v_src):
     try:
         cmd = [
@@ -66,7 +65,6 @@ def check_black_borders(v_src):
     except Exception:
         return False
 
-
 def get_fast_lufs(input_path_or_url):
     try:
         cmd = [
@@ -88,7 +86,6 @@ def get_fast_lufs(input_path_or_url):
     except Exception:
         pass
     return None
-
 
 def run_ffmpeg_analysis(input_path_or_url):
     stats = {
@@ -133,9 +130,23 @@ def run_ffmpeg_analysis(input_path_or_url):
         pass
     return stats
 
+TARGET_RES = "1920x1080"
+# Kirpmadan 1920x1080'e sigdirir, bos kalan yere siyah bant ekler (Canva'daki gibi).
+RESIZE_FILTER = (
+    "scale=1920:1080:force_original_aspect_ratio=decrease,"
+    "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1"
+)
 
-def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
+def needs_resolution_fix(resolution):
+    return resolution not in ("Bilinmiyor", TARGET_RES)
+
+def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb, fix_resolution=False):
     try:
+        # Olcu duzeltilecekse goruntu yeniden encode edilmek zorunda (-c:v copy olmaz).
+        vf_args = []
+        if fix_resolution:
+            vf_args = ["-vf", RESIZE_FILTER, "-pix_fmt", "yuv420p"]
+
         if file_size_mb > 100 and duration_sec > 0:
             target_size_mb = 98.0
             target_total_bitrate = (target_size_mb * 8192) / duration_sec
@@ -147,6 +158,7 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
                 "-y",
                 "-i",
                 input_path,
+            ] + vf_args + [
                 "-af",
                 "loudnorm=I=-24:LRA=11:TP=-2",
                 "-c:v",
@@ -157,6 +169,27 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
                 "aac",
                 "-b:a",
                 str(audio_bitrate) + "k",
+                output_path,
+            ]
+        elif fix_resolution:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+            ] + vf_args + [
+                "-af",
+                "loudnorm=I=-24:LRA=11:TP=-2",
+                "-c:v",
+                "libx264",
+                "-crf",
+                "18",
+                "-preset",
+                "medium",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
                 output_path,
             ]
         else:
@@ -183,12 +216,10 @@ def normalize_video_ffmpeg(input_path, output_path, duration_sec, file_size_mb):
     except Exception:
         return False
 
-
 LUFS_MIN, LUFS_MAX = -27.0, -19.0
 
-
-def fix_vast_video_audio(video_url, duration_sec):
-    """VAST'taki MP4'u indirir, sesi -24 LUFS'a getirir, yeni dosyayi ve olcumunu dondurur."""
+def fix_vast_video_audio(video_url, duration_sec, fix_resolution=False):
+    """VAST'taki MP4'u indirir, sesi -24 LUFS'a (gerekirse olcuyu 1920x1080'e) getirir, yeni dosyayi ve olcumunu dondurur."""
     try:
         r = requests.get(video_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
         r.raise_for_status()
@@ -198,7 +229,7 @@ def fix_vast_video_audio(video_url, duration_sec):
             with open(src, "wb") as f:
                 f.write(r.content)
             size_mb = round(os.path.getsize(src) / (1024 * 1024), 2)
-            ok = normalize_video_ffmpeg(src, out, duration_sec, size_mb)
+            ok = normalize_video_ffmpeg(src, out, duration_sec, size_mb, fix_resolution)
             if not ok or not os.path.exists(out):
                 return {"ok": False, "message": "ffmpeg normalizasyonu basarisiz."}
             new_lufs = get_fast_lufs(out)
@@ -209,19 +240,17 @@ def fix_vast_video_audio(video_url, duration_sec):
             "data": data,
             "lufs": new_lufs,
             "size_mb": round(len(data) / (1024 * 1024), 2),
+            "resolution_fixed": fix_resolution,
         }
     except Exception as e:
         return {"ok": False, "message": str(e)}
-
 
 def _media_entry(u, w, h):
     dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
     return {"url": u, "dimension": dim, "width": w, "height": h}
 
-
 def _is_vpaid(mt, api_fw, u):
     return "vpaid" in api_fw or "javascript" in mt or u.lower().endswith(".js")
-
 
 def _is_playable(mt, api_fw, u):
     # CTV'de oynatilabilir = gercek bir MediaFile, video/* tipinde, VPAID degil.
@@ -231,7 +260,6 @@ def _is_playable(mt, api_fw, u):
     if mt:
         return mt.startswith("video/")
     return ".mp4" in u.lower()
-
 
 def extract_vast_details(xml_text):
     found = []
@@ -281,7 +309,6 @@ def extract_vast_details(xml_text):
 
     return found, has_vpaid
 
-
 def find_wrapper_url(xml_text):
     try:
         xml_clean = re.sub(r'xmlns="[^"]+"', "", xml_text)
@@ -300,7 +327,6 @@ def find_wrapper_url(xml_text):
         except Exception:
             pass
     return None
-
 
 def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
     if is_xml:
@@ -372,7 +398,6 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         "message": "MP4 bulunamadi.",
     }
 
-
 if page == "📁 Otomatik Video Normalizasyonu":
     st.header("Otomatik Video Normalizasyon Araci")
     st.write("MP4 yukleyin.")
@@ -391,8 +416,13 @@ if page == "📁 Otomatik Video Normalizasyonu":
         with st.spinner("Analiz ediliyor..."):
             stats = run_ffmpeg_analysis(tp)
 
+        fix_res = needs_resolution_fix(stats["resolution"])
+
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Cozunurluk", stats["resolution"])
+        res_str = stats["resolution"]
+        if fix_res:
+            res_str = res_str + " ⚠️"
+        c1.metric("Cozunurluk", res_str)
         c2.metric("Sure", stats["duration"])
 
         lufs_str = "Olculemedi"
@@ -405,22 +435,33 @@ if page == "📁 Otomatik Video Normalizasyonu":
             border_str = "VAR ⚠️"
         c4.metric("Siyah Kenarlik", border_str)
 
+        if fix_res:
+            st.warning(
+                "Olcu " + stats["resolution"] + ", " + TARGET_RES + " degil. "
+                "Kirpmadan " + TARGET_RES + " yapilacak (gerekirse kenarlara siyah bant eklenir)."
+            )
+
         st.markdown("---")
-        st.subheader("2. Otomatik Normalizasyon (-24 LUFS & Boyut Kontrolu)")
+        st.subheader("2. Otomatik Normalizasyon (-24 LUFS, " + TARGET_RES + " & Boyut Kontrolu)")
 
         out_tmp = tp.replace(".mp4", "_norm.mp4")
         msg1 = "Video 100 MB ustunde oldugu icin 98 MB altina sikistiriliyor..."
         msg2 = "Ses seviyesi -24 LUFS yapiliyor..."
+        if fix_res:
+            msg2 = "Olcu " + TARGET_RES + " yapiliyor ve ses seviyesi -24 LUFS yapiliyor..."
         spinner_msg = msg1 if stats["size_mb"] > 100 else msg2
 
         with st.spinner(spinner_msg):
             ok = normalize_video_ffmpeg(
-                tp, out_tmp, stats["duration_sec"], stats["size_mb"]
+                tp, out_tmp, stats["duration_sec"], stats["size_mb"], fix_res
             )
 
         if ok and os.path.exists(out_tmp):
             out_size_mb = round(os.path.getsize(out_tmp) / (1024 * 1024), 2)
-            succ_msg = "✅ Islem Basarili! Ses seviyesi -24 LUFS yapildi. Yeni Boyut: " + str(out_size_mb) + " MB"
+            succ_msg = "✅ Islem Basarili! Ses seviyesi -24 LUFS yapildi."
+            if fix_res:
+                succ_msg += " Olcu " + TARGET_RES + " yapildi."
+            succ_msg += " Yeni Boyut: " + str(out_size_mb) + " MB"
             st.success(succ_msg)
             with open(out_tmp, "rb") as f:
                 nb = f.read()
@@ -517,8 +558,15 @@ elif page == "🔗 VAST Tag Analizi":
                     lufs_disp = str(stats["lufs"]) + " LUFS"
                 c4.metric("Ses", lufs_disp)
 
-                # --- Ses Duzeltme ---
-                st.subheader("Ses Duzeltme (-24 LUFS)")
+                # --- Ses & Olcu Duzeltme ---
+                fix_res = needs_resolution_fix(stats["resolution"])
+                st.subheader("Ses & Olcu Duzeltme (-24 LUFS, " + TARGET_RES + ")")
+                if fix_res:
+                    st.error(
+                        "Olcu uygun degil: " + stats["resolution"] + " (" + TARGET_RES + " olmali). "
+                        "Duzeltirken kirpmadan " + TARGET_RES + " yapilacak (gerekirse siyah bant eklenir)."
+                    )
+
                 lufs = stats["lufs"]
                 in_range = lufs is not None and LUFS_MIN <= lufs <= LUFS_MAX
                 if lufs is None:
@@ -534,13 +582,19 @@ elif page == "🔗 VAST Tag Analizi":
                         + str(int(LUFS_MIN)) + " / " + str(int(LUFS_MAX)) + ")."
                     )
 
+                fix_label = "🔧 Sesi -24 LUFS'a duzelt"
+                fix_spinner = "Video indiriliyor ve ses -24 LUFS yapiliyor..."
+                if fix_res:
+                    fix_label = "🔧 Olcuyu " + TARGET_RES + " yap + sesi -24 LUFS'a duzelt"
+                    fix_spinner = "Video indiriliyor, olcu " + TARGET_RES + " ve ses -24 LUFS yapiliyor..."
+
                 if st.button(
-                    "🔧 Sesi -24 LUFS'a duzelt",
-                    type="secondary" if in_range else "primary",
+                    fix_label,
+                    type="secondary" if in_range and not fix_res else "primary",
                 ):
-                    with st.spinner("Video indiriliyor ve ses -24 LUFS yapiliyor..."):
+                    with st.spinner(fix_spinner):
                         st.session_state["vast_fixed"] = fix_vast_video_audio(
-                            video_url, stats["duration_sec"]
+                            video_url, stats["duration_sec"], fix_res
                         )
 
                 fixed = st.session_state.get("vast_fixed")
@@ -549,14 +603,16 @@ elif page == "🔗 VAST Tag Analizi":
                         new_lufs = "Olculemedi"
                         if fixed["lufs"] is not None:
                             new_lufs = str(fixed["lufs"]) + " LUFS"
+                        out_res = TARGET_RES if fixed.get("resolution_fixed") else res_disp
                         st.success(
                             "✅ Ses duzeltildi! Yeni seviye: " + new_lufs
+                            + " | Olcu: " + out_res
                             + " | Boyut: " + str(fixed["size_mb"]) + " MB"
                         )
                         st.download_button(
                             "⬇️ Duzeltilmis Videoyu Indir (-24 LUFS)",
                             fixed["data"],
-                            file_name="vast_video_" + res_disp + "_-24LUFS.mp4",
+                            file_name="vast_video_" + out_res + "_-24LUFS.mp4",
                             mime="video/mp4",
                         )
                     else:
@@ -567,7 +623,10 @@ elif page == "🔗 VAST Tag Analizi":
                 st.video(video_url)
                 fixed = st.session_state.get("vast_fixed")
                 if fixed and fixed.get("ok"):
-                    st.caption("Duzeltilmis versiyon (-24 LUFS)")
+                    cap = "Duzeltilmis versiyon (-24 LUFS)"
+                    if fixed.get("resolution_fixed"):
+                        cap = "Duzeltilmis versiyon (-24 LUFS, " + TARGET_RES + ")"
+                    st.caption(cap)
                     st.video(fixed["data"])
 
         else:
