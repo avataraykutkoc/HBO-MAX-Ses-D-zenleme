@@ -328,7 +328,7 @@ def find_wrapper_url(xml_text):
             pass
     return None
 
-def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
+def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5, api_frameworks="7"):
     if is_xml:
         medias, has_vpaid = extract_vast_details(vast_input)
         s_val = "ok" if medias else "no_media"
@@ -360,7 +360,10 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         curr_url = curr_url.replace("[BREAKPOSITION]", "1")
         # CTV (FreeWheel) VPAID desteklemez; yalnizca OMID (7) bildiriyoruz.
         # "1,2,7" yazinca reklam sunucusu VPAID dondurmeye tesvik ediliyordu.
-        curr_url = curr_url.replace("[APIFRAMEWORKS]", "7")
+        # api_frameworks=None ise makro oldugu gibi birakilir (global ekibin
+        # VAST checker'i ve makroyu doldurmayan oynaticilar tag'i boyle cagirir).
+        if api_frameworks is not None:
+            curr_url = curr_url.replace("[APIFRAMEWORKS]", api_frameworks)
         curr_url = curr_url.replace("[OMIDPARTNER]", "1")
 
         try:
@@ -378,7 +381,7 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
             if medias:
                 return {
                     "medias": medias,
-                    "has_vpaid": has_vpaid,
+                    "has_vpaid": last_has_vpaid,
                     "xml": last_xml,
                     "status": "ok",
                 }
@@ -397,6 +400,15 @@ def resolve_vast_and_get_media(vast_input, is_xml=False, max_redirects=5):
         "xml": last_xml,
         "message": "MP4 bulunamadi.",
     }
+
+def check_raw_vpaid(vast_input):
+    # MP4'u bulmak icin [APIFRAMEWORKS]=7 gonderiyoruz; bu da VPAID'i gizliyor.
+    # Tag'i bir de makroya dokunmadan cagirip VPAID donuyor mu bakiyoruz ki
+    # 15 dosyadan 1'i bile VPAID ise uyari her kosulda gorunsun.
+    if "[APIFRAMEWORKS]" not in vast_input:
+        return False
+    raw = resolve_vast_and_get_media(vast_input, api_frameworks=None)
+    return bool(raw.get("has_vpaid"))
 
 if page == "📁 Otomatik Video Normalizasyonu":
     st.header("Otomatik Video Normalizasyon Araci")
@@ -499,6 +511,8 @@ elif page == "🔗 VAST Tag Analizi":
                 res_data = resolve_vast_and_get_media(
                     vast_input, is_xml=is_xml_bool
                 )
+                if not is_xml_bool:
+                    res_data["vpaid_raw"] = check_raw_vpaid(vast_input)
                 result = {"input": vast_input, "res_data": res_data}
 
                 if res_data["status"] == "ok" and res_data.get("medias"):
@@ -534,10 +548,22 @@ elif page == "🔗 VAST Tag Analizi":
                 with c_ctv1:
                     st.success("Oynatillabilir MP4: VAR ✅")
                 with c_ctv2:
-                    if res_data.get("has_vpaid"):
-                        st.warning("VPAID Bagimliligi: VAR ⚠️")
+                    if res_data.get("has_vpaid") or res_data.get("vpaid_raw"):
+                        st.warning("VPAID Dosyasi: VAR ⚠️")
                     else:
-                        st.success("VPAID Bagimliligi: YOK ✅")
+                        st.success("VPAID Dosyasi: YOK ✅")
+
+                if res_data.get("has_vpaid") or res_data.get("vpaid_raw"):
+                    msg = (
+                        "Tag'de en az 1 VPAID (JavaScript) MediaFile var. MP4 yedegi oldugu icin "
+                        "CTV oynatir, ama global ekibin VAST checker'i bunu hata olarak gosterir."
+                    )
+                    if res_data.get("vpaid_raw") and not res_data.get("has_vpaid"):
+                        msg += (
+                            " VPAID, tag [APIFRAMEWORKS] makrosu doldurulmadan cagrilinca geliyor. "
+                            "Cozum: tag'de dc_sdk_apis=[APIFRAMEWORKS] yerine dc_sdk_apis=7 yazin."
+                        )
+                    st.warning(msg)
 
                 st.subheader("Olculen Video & Ses")
                 c1, c2, c3, c4 = st.columns(4)
@@ -632,8 +658,8 @@ elif page == "🔗 VAST Tag Analizi":
         else:
             st.subheader("CTV Uygunluk")
             st.error("Oynatilabilir MP4: YOK ❌")
-            if res_data.get("has_vpaid"):
-                st.error("VPAID Bagimliligi: VAR ⚠️ Tag sadece VPAID donduruyor, CTV'de oynamaz.")
+            if res_data.get("has_vpaid") or res_data.get("vpaid_raw"):
+                st.error("VPAID Dosyasi: VAR ⚠️ Tag sadece VPAID donduruyor, CTV'de oynamaz.")
             xml_txt = res_data.get("xml") or ""
             if "<Mezzanine" in xml_txt:
                 st.warning(
