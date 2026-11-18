@@ -245,9 +245,16 @@ def fix_vast_video_audio(video_url, duration_sec, fix_resolution=False):
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
-def _media_entry(u, w, h):
+def _media_entry(u, w, h, bitrate=None, mtype=None):
     dim = str(w) + "x" + str(h) if w and h else "Bilinmiyor"
-    return {"url": u, "dimension": dim, "width": w, "height": h}
+    return {
+        "url": u,
+        "dimension": dim,
+        "width": w,
+        "height": h,
+        "bitrate": bitrate,
+        "type": mtype,
+    }
 
 def _is_vpaid(mt, api_fw, u):
     return "vpaid" in api_fw or "javascript" in mt or u.lower().endswith(".js")
@@ -283,7 +290,15 @@ def extract_vast_details(xml_text):
             if _is_vpaid(mt, api_fw, u):
                 has_vpaid = True
             elif _is_playable(mt, api_fw, u):
-                found.append(_media_entry(u, mf.get("width"), mf.get("height")))
+                found.append(
+                    _media_entry(
+                        u,
+                        mf.get("width"),
+                        mf.get("height"),
+                        mf.get("bitrate") or mf.get("maxBitrate"),
+                        mf.get("type"),
+                    )
+                )
 
         for res_tag in root.findall(".//HTMLResource") + root.findall(".//JavaScriptResource"):
             if res_tag.text and "vpaid" in res_tag.text.lower():
@@ -305,7 +320,15 @@ def extract_vast_details(xml_text):
             if _is_vpaid(mt, api_fw, u):
                 has_vpaid = True
             elif _is_playable(mt, api_fw, u):
-                found.append(_media_entry(u, attr("width") or None, attr("height") or None))
+                found.append(
+                    _media_entry(
+                        u,
+                        attr("width") or None,
+                        attr("height") or None,
+                        attr("bitrate") or attr("maxBitrate") or None,
+                        attr("type") or None,
+                    )
+                )
 
     return found, has_vpaid
 
@@ -583,6 +606,42 @@ elif page == "🔗 VAST Tag Analizi":
                 if stats["lufs"] is not None:
                     lufs_disp = str(stats["lufs"]) + " LUFS"
                 c4.metric("Ses", lufs_disp)
+
+                # --- Tag'deki tum olculerin listesi ---
+                all_medias = res_data.get("medias") or []
+                if all_medias:
+                    rows = []
+                    for i, m in enumerate(all_medias, start=1):
+                        is_analyzed = m["url"] == video_url
+                        rows.append(
+                            {
+                                "#": i,
+                                "Olcu": m["dimension"],
+                                "Bitrate (kbps)": m.get("bitrate") or "-",
+                                "Tur": m.get("type") or "-",
+                                "Analiz edilen": "✅" if is_analyzed else "",
+                                "1920x1080": "✅" if m["dimension"] == TARGET_RES else "",
+                                "URL": m["url"],
+                            }
+                        )
+                    with st.expander(
+                        "📐 Tag'deki tum olculer (" + str(len(all_medias)) + " adet)",
+                        expanded=len(all_medias) > 1,
+                    ):
+                        st.dataframe(
+                            pd.DataFrame(rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "URL": st.column_config.LinkColumn("URL", display_text="Ac")
+                            },
+                        )
+                        uniq = sorted({m["dimension"] for m in all_medias})
+                        st.caption("Benzersiz olculer: " + ", ".join(uniq))
+                        if not any(m["dimension"] == TARGET_RES for m in all_medias):
+                            st.warning(
+                                TARGET_RES + " olcusunde MediaFile yok; ilk MP4 analiz edildi."
+                            )
 
                 # --- Ses & Olcu Duzeltme ---
                 fix_res = needs_resolution_fix(stats["resolution"])
